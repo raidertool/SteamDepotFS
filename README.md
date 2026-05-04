@@ -88,11 +88,13 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
   --mount-point /tmp/steam-depotfs \
   --cache-dir /tmp/steam-depotfs-cache \
   --cache-max-bytes 8G \
-  --cache-low-watermark 7G \
-  --cache-min-free-bytes 1G
+  --cache-low-watermark 6G \
+  --cache-min-free-bytes 2G
 ```
 
-`--cache-max-bytes` is the hard cap. When storing a new chunk would cross it, the cache evicts least-recently-used chunk files until it reaches `--cache-low-watermark`. If a single chunk is larger than the cap, it is served without being stored.
+`--cache-max-bytes` is the hard cap. `--cache-low-watermark` is the cache size to return to after eviction, not the amount of free disk space to keep. For example, with `--cache-max-bytes 8G` and `--cache-low-watermark 6G`, the cache can grow to 8 GiB; once a new chunk would exceed that cap, old chunks are evicted until the cache is back near 6 GiB.
+
+`--cache-min-free-bytes` is the free-space guard for the filesystem that contains the cache. If a single chunk is larger than the cache cap, it is served without being stored.
 
 ## Testing
 
