@@ -49,6 +49,7 @@ dotnet build "$PROJECT" -c Release
 
 if [[ -z "$READ_PATH" ]]; then
   LIST_FILE="$WORK_ROOT/steam-depotfs-auth-file-list.txt"
+  CANDIDATES_FILE="$WORK_ROOT/steam-depotfs-auth-benchmark-candidates.tsv"
   dotnet run --no-build --project "$PROJECT" -c Release -- list \
     --app "$APP_ID" \
     --depot "$DEPOT_ID" \
@@ -56,7 +57,41 @@ if [[ -z "$READ_PATH" ]]; then
     --limit "$LIST_LIMIT" \
     "${COMMON_ARGS[@]}" >"$LIST_FILE"
 
-  READ_PATH="$(
+  awk '
+    BEGIN { IGNORECASE = 1 }
+    /^[[:space:]]*[0-9]+[[:space:]]+/ {
+      size = $1
+      path = $0
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", path)
+      if (path ~ /\.(utoc|ucas|pak)$/) {
+        print size "\t" path
+      }
+    }
+  ' "$LIST_FILE" | sort -nr >"$CANDIDATES_FILE"
+
+  while IFS=$'\t' read -r candidate_size candidate_path; do
+    PROBE_FILE="$WORK_ROOT/steam-depotfs-auth-benchmark-probe.bin"
+    rm -f "$PROBE_FILE"
+    echo "Probing candidate size=$candidate_size path=$candidate_path"
+    dotnet run --no-build --project "$PROJECT" -c Release -- read \
+      --app "$APP_ID" \
+      --depot "$DEPOT_ID" \
+      --path "$candidate_path" \
+      --length 1 \
+      --out "$PROBE_FILE" \
+      --cache-dir "$CACHE_DIR/probe-cache" \
+      --read-ahead-chunks 0 \
+      "${COMMON_ARGS[@]}" >/dev/null
+
+    if [[ -s "$PROBE_FILE" ]]; then
+      READ_PATH="$candidate_path"
+      echo "Selected benchmark candidate size=$candidate_size path=$READ_PATH"
+      break
+    fi
+  done <"$CANDIDATES_FILE"
+
+  if [[ -z "$READ_PATH" ]]; then
+    READ_PATH="$(
     awk '
       BEGIN { IGNORECASE = 1 }
       /^[[:space:]]*[0-9]+[[:space:]]+/ {
@@ -70,7 +105,8 @@ if [[ -z "$READ_PATH" ]]; then
       }
       END { print best_path }
     ' "$LIST_FILE"
-  )"
+    )"
+  fi
 fi
 
 if [[ -z "$READ_PATH" ]]; then
@@ -87,4 +123,10 @@ export CACHE_ROOT="${CACHE_ROOT:-$WORK_ROOT/steam-depotfs-auth-benchmark-matrix}
 echo "Benchmarking app=$APP_ID depot=$DEPOT_ID branch=$BRANCH path=$READ_PATH length=$LENGTH"
 echo "Matrix read_ahead=[$READ_AHEAD_VALUES] concurrency=[$CONCURRENCY_VALUES] iterations=$ITERATIONS"
 
-"$ROOT/scripts/bench/read-matrix.sh" "$APP_ID" "$DEPOT_ID" "$READ_PATH" "${COMMON_ARGS[@]}"
+RESULTS_FILE="$WORK_ROOT/steam-depotfs-auth-benchmark-results.csv"
+"$ROOT/scripts/bench/read-matrix.sh" "$APP_ID" "$DEPOT_ID" "$READ_PATH" "${COMMON_ARGS[@]}" | tee "$RESULTS_FILE"
+
+if ! awk -F, 'NR > 1 && $5 ~ /misses=[1-9]/ && $5 ~ /downloaded=[1-9]/ { ok = 1 } END { exit ok ? 0 : 1 }' "$RESULTS_FILE"; then
+  echo "Benchmark did not exercise any cache-miss chunk downloads." >&2
+  exit 1
+fi
