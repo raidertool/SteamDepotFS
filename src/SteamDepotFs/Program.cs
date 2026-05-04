@@ -120,9 +120,7 @@ internal static class Program
 
         var chunkLimit = parsed.GetInt("--chunks") ?? 12;
         var chunks = file.Chunks;
-        var manifestOrderIsSorted = chunks
-            .Zip(chunks.Skip(1), static (left, right) => left.Offset <= right.Offset)
-            .All(static sorted => sorted);
+        var manifestOrderIsSorted = ChunkOrdering.IsOffsetOrdered(chunks, static chunk => (long)chunk.Offset);
         var coveredBytes = chunks.Aggregate(0UL, static (total, chunk) => total + chunk.UncompressedLength);
         var minOffset = chunks.Count == 0 ? 0 : chunks.Min(static chunk => chunk.Offset);
         var maxEnd = chunks.Count == 0 ? 0 : chunks.Max(static chunk => chunk.Offset + chunk.UncompressedLength);
@@ -391,6 +389,7 @@ internal sealed class DepotReader : IAsyncDisposable
     private readonly Dictionary<string, string?> _cdnTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _cdnTokenGate = new(1, 1);
     private readonly SemaphoreSlim _downloadGate;
+    private readonly ConcurrentDictionary<string, DepotManifest.ChunkData[]> _orderedChunksByPath = new(StringComparer.Ordinal);
     private int _serverCursor;
 
     private DepotReader(
@@ -468,8 +467,10 @@ internal sealed class DepotReader : IAsyncDisposable
     }
 
     public async Task<int> ReadAsync(DepotManifest.FileData file, long offset, byte[] destination, CancellationToken cancellationToken)
-        => await ChunkReadPipeline.ReadAsync(
-            file.Chunks,
+    {
+        var chunks = ChunksInFileOffsetOrder(file);
+        return await ChunkReadPipeline.ReadAsync(
+            chunks,
             file.TotalSize,
             offset,
             destination,
@@ -477,8 +478,28 @@ internal sealed class DepotReader : IAsyncDisposable
             static chunk => (long)chunk.Offset,
             static chunk => chunk.UncompressedLength,
             GetChunkAsync,
-            lastChunkIndex => Prefetcher.Schedule(file.Chunks, lastChunkIndex),
+            lastChunkIndex => Prefetcher.Schedule(chunks, lastChunkIndex),
             cancellationToken);
+    }
+
+    private IReadOnlyList<DepotManifest.ChunkData> ChunksInFileOffsetOrder(DepotManifest.FileData file)
+    {
+        var chunks = file.Chunks;
+        if (chunks.Count < 2)
+        {
+            return chunks;
+        }
+
+        var fileName = file.FileName;
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return ChunkOrdering.EnsureOffsetOrder(chunks, static chunk => (long)chunk.Offset);
+        }
+
+        return _orderedChunksByPath.GetOrAdd(
+            fileName,
+            _ => ChunkOrdering.EnsureOffsetOrder(chunks, static chunk => (long)chunk.Offset).ToArray());
+    }
 
     private async Task<byte[]> GetChunkAsync(DepotManifest.ChunkData chunk, CancellationToken cancellationToken)
     {
@@ -710,6 +731,45 @@ internal static class ChunkReadPipeline
         long ReadStart,
         int DestinationOffset,
         int Length);
+}
+
+internal static class ChunkOrdering
+{
+    public static IReadOnlyList<TChunk> EnsureOffsetOrder<TChunk>(
+        IReadOnlyList<TChunk> chunks,
+        Func<TChunk, long> chunkOffset)
+    {
+        if (chunks.Count < 2 || IsOffsetOrdered(chunks, chunkOffset))
+        {
+            return chunks;
+        }
+
+        return chunks.OrderBy(chunkOffset).ToArray();
+    }
+
+    public static bool IsOffsetOrdered<TChunk>(
+        IReadOnlyList<TChunk> chunks,
+        Func<TChunk, long> chunkOffset)
+    {
+        if (chunks.Count < 2)
+        {
+            return true;
+        }
+
+        var previousOffset = chunkOffset(chunks[0]);
+        for (var i = 1; i < chunks.Count; i++)
+        {
+            var currentOffset = chunkOffset(chunks[i]);
+            if (currentOffset < previousOffset)
+            {
+                return false;
+            }
+
+            previousOffset = currentOffset;
+        }
+
+        return true;
+    }
 }
 
 internal sealed class ChunkPrefetcher<TChunk> : IAsyncDisposable

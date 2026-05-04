@@ -77,6 +77,37 @@ public sealed class ChunkReadPipelineTests
         Assert.Equal(2, peak);
     }
 
+    [Fact]
+    public async Task ReadAsync_UsesOffsetOrderedChunksWhenManifestOrderIsUnsorted()
+    {
+        var manifestChunks = new[]
+        {
+            new TestChunk(0, 8, [8, 9, 10, 11]),
+            new TestChunk(1, 0, [0, 1, 2, 3]),
+            new TestChunk(2, 4, [4, 5, 6, 7])
+        };
+        var chunks = ChunkOrdering.EnsureOffsetOrder(manifestChunks, static chunk => chunk.Offset);
+        var destination = new byte[8];
+        var afterReadChunk = -1;
+
+        var read = await ChunkReadPipeline.ReadAsync(
+            chunks,
+            totalSize: 12,
+            offset: 0,
+            destination,
+            maxConcurrency: 4,
+            static chunk => chunk.Offset,
+            static chunk => chunk.Length,
+            static (chunk, _) => Task.FromResult(chunk.Bytes),
+            lastChunkIndex => afterReadChunk = lastChunkIndex,
+            CancellationToken.None);
+
+        Assert.Equal([1, 2, 0], chunks.Select(static chunk => chunk.Index));
+        Assert.Equal(8, read);
+        Assert.Equal(Enumerable.Range(0, 8).Select(static value => (byte)value), destination);
+        Assert.Equal(1, afterReadChunk);
+    }
+
     private static void UpdatePeak(ref int peak, int current)
     {
         while (true)
