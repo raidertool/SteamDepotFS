@@ -1114,6 +1114,9 @@ internal sealed class DepotFuseFileSystem : FileSystem
     protected override Errno OnOpenDirectory(string directory, OpenedPathInfo info)
         => _reader.Index.TryGetDirectory(directory, out _) ? 0 : Errno.ENOENT;
 
+    protected override Errno OnReleaseDirectory(string directory, OpenedPathInfo info)
+        => 0;
+
     protected override Errno OnReadDirectory(string directory, OpenedPathInfo info, out IEnumerable<DirectoryEntry> paths)
     {
         paths = [];
