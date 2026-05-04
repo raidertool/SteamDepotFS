@@ -1,0 +1,34 @@
+name: Public depot test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  public-depot:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install FUSE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 libfuse2
+          sudo modprobe fuse || true
+
+      - name: Test public Steam depot
+        run: scripts/ci/test-steam-depotfs-public.sh
+        env:
+          CACHE_MAX_BYTES: 8G
+          CACHE_LOW_WATERMARK: 7G
+          CACHE_MIN_FREE_BYTES: 1G
+          REQUIRE_FUSE: 1
