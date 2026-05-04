@@ -109,8 +109,15 @@ That depot is small and works anonymously, so it is useful for validating Steam 
 Run the public test script:
 
 ```bash
-CACHE_MAX_BYTES=8G CACHE_LOW_WATERMARK=7G REQUIRE_FUSE=1 \
+CACHE_MAX_BYTES=8G CACHE_LOW_WATERMARK=6G CACHE_MIN_FREE_BYTES=2G REQUIRE_FUSE=1 \
   scripts/ci/test-steam-depotfs-public.sh
 ```
 
 The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE, and verifies the file is visible through the mounted filesystem.
+
+The workflow also includes an authenticated smoke test for pushes and manual runs. It defaults to the same Spacewar depot, but logs in with configured Steam credentials so the authenticated path is covered. Configure either:
+
+- `OP_SERVICE_ACCOUNT_TOKEN` secret plus `OP_STEAM_USERNAME_REF` and `OP_STEAM_PASSWORD_REF` variables for 1Password-backed credentials.
+- `STEAM_USERNAME` and `STEAM_PASSWORD` secrets, or `STEAM_ACCESS_TOKEN` secret, for direct credentials.
+
+To point the authenticated test at another depot, set `STEAM_DEPOTFS_AUTH_APP_ID`, `STEAM_DEPOTFS_AUTH_DEPOT_ID`, `STEAM_DEPOTFS_AUTH_BRANCH`, and `STEAM_DEPOTFS_AUTH_READ_PATH` variables.

@@ -1,10 +1,11 @@
-name: Public depot test
+name: Depot tests
 
 on:
   push:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 jobs:
   public-depot:
@@ -29,6 +30,97 @@ jobs:
         run: scripts/ci/test-steam-depotfs-public.sh
         env:
           CACHE_MAX_BYTES: 8G
-          CACHE_LOW_WATERMARK: 7G
-          CACHE_MIN_FREE_BYTES: 1G
+          CACHE_LOW_WATERMARK: 6G
+          CACHE_MIN_FREE_BYTES: 2G
           REQUIRE_FUSE: 1
+
+  authenticated-depot:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Detect authenticated test configuration
+        id: auth-config
+        shell: bash
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN_VALUE: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_STEAM_USERNAME_REF_VALUE: ${{ vars.OP_STEAM_USERNAME_REF }}
+          OP_STEAM_PASSWORD_REF_VALUE: ${{ vars.OP_STEAM_PASSWORD_REF }}
+          STEAM_USERNAME_SECRET: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD_SECRET: ${{ secrets.STEAM_PASSWORD }}
+          STEAM_ACCESS_TOKEN_SECRET: ${{ secrets.STEAM_ACCESS_TOKEN }}
+        run: |
+          [[ -n "$OP_SERVICE_ACCOUNT_TOKEN_VALUE" ]] && echo "::add-mask::$OP_SERVICE_ACCOUNT_TOKEN_VALUE"
+          [[ -n "$STEAM_USERNAME_SECRET" ]] && echo "::add-mask::$STEAM_USERNAME_SECRET"
+          [[ -n "$STEAM_PASSWORD_SECRET" ]] && echo "::add-mask::$STEAM_PASSWORD_SECRET"
+          [[ -n "$STEAM_ACCESS_TOKEN_SECRET" ]] && echo "::add-mask::$STEAM_ACCESS_TOKEN_SECRET"
+
+          has_op=false
+          if [[ -n "$OP_SERVICE_ACCOUNT_TOKEN_VALUE" && -n "$OP_STEAM_USERNAME_REF_VALUE" && -n "$OP_STEAM_PASSWORD_REF_VALUE" ]]; then
+            has_op=true
+          fi
+
+          has_github=false
+          if [[ -n "$STEAM_ACCESS_TOKEN_SECRET" || ( -n "$STEAM_USERNAME_SECRET" && -n "$STEAM_PASSWORD_SECRET" ) ]]; then
+            has_github=true
+          fi
+
+          configured=false
+          if [[ "$has_op" == "true" || "$has_github" == "true" ]]; then
+            configured=true
+          else
+            echo "::notice::Skipping authenticated Steam test because no Steam credentials are configured."
+          fi
+
+          {
+            echo "has_op=$has_op"
+            echo "has_github=$has_github"
+            echo "configured=$configured"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Load Steam secrets from 1Password
+        if: ${{ steps.auth-config.outputs.has_op == 'true' }}
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          STEAM_USERNAME: ${{ vars.OP_STEAM_USERNAME_REF }}
+          STEAM_PASSWORD: ${{ vars.OP_STEAM_PASSWORD_REF }}
+
+      - name: Export Steam secrets from GitHub
+        if: ${{ steps.auth-config.outputs.has_op != 'true' && steps.auth-config.outputs.has_github == 'true' }}
+        shell: bash
+        env:
+          STEAM_USERNAME_SECRET: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD_SECRET: ${{ secrets.STEAM_PASSWORD }}
+          STEAM_ACCESS_TOKEN_SECRET: ${{ secrets.STEAM_ACCESS_TOKEN }}
+        run: |
+          {
+            [[ -n "$STEAM_USERNAME_SECRET" ]] && echo "STEAM_USERNAME=$STEAM_USERNAME_SECRET"
+            [[ -n "$STEAM_PASSWORD_SECRET" ]] && echo "STEAM_PASSWORD=$STEAM_PASSWORD_SECRET"
+            [[ -n "$STEAM_ACCESS_TOKEN_SECRET" ]] && echo "STEAM_ACCESS_TOKEN=$STEAM_ACCESS_TOKEN_SECRET"
+          } >> "$GITHUB_ENV"
+
+      - name: Test authenticated Steam depot access
+        if: ${{ steps.auth-config.outputs.configured == 'true' }}
+        run: scripts/ci/test-steam-depotfs-auth.sh
+        env:
+          CACHE_MAX_BYTES: 8G
+          CACHE_LOW_WATERMARK: 6G
+          CACHE_MIN_FREE_BYTES: 2G
+          STEAM_LOGIN_ID: ${{ vars.STEAM_LOGIN_ID }}
+          STEAM_DEPOTFS_AUTH_APP_ID: ${{ vars.STEAM_DEPOTFS_AUTH_APP_ID }}
+          STEAM_DEPOTFS_AUTH_DEPOT_ID: ${{ vars.STEAM_DEPOTFS_AUTH_DEPOT_ID }}
+          STEAM_DEPOTFS_AUTH_BRANCH: ${{ vars.STEAM_DEPOTFS_AUTH_BRANCH }}
+          STEAM_DEPOTFS_AUTH_MANIFEST_ID: ${{ vars.STEAM_DEPOTFS_AUTH_MANIFEST_ID }}
+          STEAM_DEPOTFS_AUTH_READ_PATH: ${{ vars.STEAM_DEPOTFS_AUTH_READ_PATH }}
+          STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH: ${{ secrets.STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH }}
