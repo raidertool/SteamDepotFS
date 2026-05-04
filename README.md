@@ -6,7 +6,7 @@ It was created for GitHub workflows that operate on Steam game files but have li
 
 ## Installation
 
-For CI or other projects, download the latest Linux x64 release archive. The release binary is self-contained and does not require the .NET SDK:
+For CI or other projects, download the latest Linux x64 release archive. The release build is self-contained and does not require the .NET SDK:
 
 ```bash
 curl -L -o SteamDepotFS-linux-x64.tar.gz \
@@ -138,3 +138,12 @@ Releases are created directly from `main` after the `Depot tests` workflow succe
 - docs-only or CI-only changes do not create a release
 
 Each release publishes a Linux x64 archive with both a versioned asset name and the stable `SteamDepotFS-linux-x64.tar.gz` asset name for `releases/latest` downloads.
+
+## License
+
+SteamDepotFS is licensed under the Apache License, Version 2.0. See `LICENSE`
+and `NOTICE`.
+
+Binary distributions may include third-party NuGet packages under their own
+licenses, including SteamKit2 under LGPL-2.1-only. See
+`THIRD-PARTY-NOTICES.md`.

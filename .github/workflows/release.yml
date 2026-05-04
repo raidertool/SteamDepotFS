@@ -53,7 +53,6 @@ jobs:
             -c Release \
             -r linux-x64 \
             --self-contained true \
-            -p:PublishSingleFile=true \
             -p:UseAppHost=true \
             -p:Version="$version" \
             -p:AssemblyVersion="$version.0" \
@@ -63,6 +62,7 @@ jobs:
           mkdir -p "dist/$archive_root"
           cp -R "$publish_dir"/. "dist/$archive_root/"
           cp README.md "dist/$archive_root/"
+          cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "dist/$archive_root/"
           printf '%s\n' "$version" > "dist/$archive_root/VERSION"
           tar -C dist -czf "dist/$archive_root.tar.gz" "$archive_root"
           cp "dist/$archive_root.tar.gz" "dist/SteamDepotFS-linux-x64.tar.gz"

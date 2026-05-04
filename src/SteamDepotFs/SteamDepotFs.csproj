@@ -6,6 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseAppHost>false</UseAppHost>
+    <Authors>Alex Bowe</Authors>
+    <Description>Read-only, on-demand filesystem access for Steam depots.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/raidertool/SteamDepotFS</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/raidertool/SteamDepotFS</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
