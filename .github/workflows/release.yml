@@ -37,6 +37,7 @@ jobs:
         shell: bash
         env:
           RELEASE_NOTES_FILE: dist/RELEASE_NOTES.md
+          CHANGELOG_FILE: dist/CHANGELOG.md
         run: |
           mkdir -p dist
           scripts/ci/compute-release-version.sh
@@ -62,6 +63,7 @@ jobs:
           mkdir -p "dist/$archive_root"
           cp -R "$publish_dir"/. "dist/$archive_root/"
           cp README.md "dist/$archive_root/"
+          cp dist/CHANGELOG.md "dist/$archive_root/"
           cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "dist/$archive_root/"
           printf '%s\n' "$version" > "dist/$archive_root/VERSION"
           tar -C dist -czf "dist/$archive_root.tar.gz" "$archive_root"
@@ -88,6 +90,7 @@ jobs:
           gh release create "$tag" \
             "dist/SteamDepotFS-$version-linux-x64.tar.gz" \
             "dist/SteamDepotFS-linux-x64.tar.gz" \
+            "dist/CHANGELOG.md" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$tag" \
             --notes-file dist/RELEASE_NOTES.md

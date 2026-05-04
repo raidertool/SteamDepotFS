@@ -52,24 +52,83 @@ fi
 
 tag="v$version"
 
+has_commits() {
+  local log_range="$1"
+  [[ "$(git rev-list --count "$log_range")" != "0" ]]
+}
+
+write_commit_list() {
+  local log_range="$1"
+
+  if has_commits "$log_range"; then
+    git log --format='- %s (%h)' --reverse "$log_range"
+  else
+    echo "- No user-facing changes."
+  fi
+}
+
+write_release_section() {
+  local section_tag="$1"
+  local log_range="$2"
+  local previous_tag="$3"
+
+  echo "## $section_tag"
+  echo
+  if [[ -n "$previous_tag" ]]; then
+    echo "Changes since $previous_tag:"
+  else
+    echo "Initial release."
+  fi
+  echo
+  write_commit_list "$log_range"
+}
+
 notes_file="${RELEASE_NOTES_FILE:-}"
 if [[ -n "$notes_file" ]]; then
+  write_release_section "$tag" "$range" "$latest_tag" >"$notes_file"
+fi
+
+changelog_file="${CHANGELOG_FILE:-}"
+if [[ -n "$changelog_file" ]]; then
+  historical_tags=()
+  while IFS= read -r historical_tag; do
+    historical_tags+=("$historical_tag")
+  done < <(git tag --list 'v[0-9]*' --sort=v:refname)
+
   {
-    echo "## $tag"
-    echo
-    if [[ -n "$latest_tag" ]]; then
-      echo "Changes since $latest_tag:"
-    else
-      echo "Initial release."
-    fi
+    echo "# Changelog"
     echo
 
-    if [[ -n "$(git log --format='%s' "$range")" ]]; then
-      git log --format='- %s (%h)' --reverse "$range"
-    else
-      echo "- No user-facing changes."
+    sections_written=0
+    if [[ "$released" == "true" ]]; then
+      write_release_section "$tag" "$range" "$latest_tag"
+      sections_written=$((sections_written + 1))
     fi
-  } >"$notes_file"
+
+    for ((i=${#historical_tags[@]} - 1; i >= 0; i--)); do
+      current_tag="${historical_tags[$i]}"
+      if [[ "$released" == "true" && "$current_tag" == "$tag" ]]; then
+        continue
+      fi
+
+      previous_tag=""
+      historical_range="$current_tag"
+      if ((i > 0)); then
+        previous_tag="${historical_tags[$((i - 1))]}"
+        historical_range="$previous_tag..$current_tag"
+      fi
+
+      if ((sections_written > 0)); then
+        echo
+      fi
+      write_release_section "$current_tag" "$historical_range" "$previous_tag"
+      sections_written=$((sections_written + 1))
+    done
+
+    if ((sections_written == 0)); then
+      echo "No releases yet."
+    fi
+  } >"$changelog_file"
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
