@@ -6,7 +6,13 @@ It was created for GitHub workflows that operate on Steam game files but have li
 
 ## Installation
 
-Install the .NET 8 SDK.
+For CI or other projects, download the latest Linux x64 release archive. The release binary is self-contained and does not require the .NET SDK:
+
+```bash
+curl -L -o SteamDepotFS-linux-x64.tar.gz \
+  https://github.com/raidertool/SteamDepotFS/releases/latest/download/SteamDepotFS-linux-x64.tar.gz
+tar -xzf SteamDepotFS-linux-x64.tar.gz
+```
 
 For mounted filesystem access on Linux, install FUSE:
 
@@ -16,13 +22,13 @@ sudo apt-get install -y fuse3 libfuse2
 sudo modprobe fuse || true
 ```
 
-Build the project:
+The `smoke`, `list`, and `read` commands do not require FUSE. Only `mount` requires FUSE.
+
+To build from source instead, install the .NET 8 SDK and run:
 
 ```bash
 dotnet build src/SteamDepotFs/SteamDepotFs.csproj -c Release
 ```
-
-The `smoke`, `list`, and `read` commands do not require FUSE. Only `mount` requires FUSE.
 
 ## Usage
 
@@ -121,3 +127,14 @@ The workflow also includes an authenticated smoke test for pushes and manual run
 - `STEAM_USERNAME` and `STEAM_PASSWORD` secrets, or `STEAM_ACCESS_TOKEN` secret, for direct credentials.
 
 Set `STEAM_DEPOTFS_AUTH_APP_ID`, `STEAM_DEPOTFS_AUTH_DEPOT_ID`, and `STEAM_DEPOTFS_AUTH_BRANCH` variables to choose the authenticated test target. `STEAM_DEPOTFS_AUTH_READ_PATH` is optional; when omitted, the smoke command chooses a small readable file from the manifest.
+
+## Releases
+
+Releases are created directly from `main` after the `Depot tests` workflow succeeds. The release workflow scans conventional commits since the latest `v*` tag:
+
+- breaking changes create a major release
+- `feat:` creates a minor release
+- `fix:`, `perf:`, `refactor:`, and `revert:` create a patch release
+- docs-only or CI-only changes do not create a release
+
+Each release publishes a Linux x64 archive with both a versioned asset name and the stable `SteamDepotFS-linux-x64.tar.gz` asset name for `releases/latest` downloads.
