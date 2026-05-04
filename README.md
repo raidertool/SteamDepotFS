@@ -155,7 +155,7 @@ Releases are created directly from `main` after the `Depot tests` workflow succe
 - `fix:`, `perf:`, `refactor:`, and `revert:` create a patch release
 - docs-only or CI-only changes do not create a release
 
-Each release publishes a Linux x64 archive with both a versioned asset name and the stable `SteamDepotFS-linux-x64.tar.gz` asset name for `releases/latest` downloads. CI also generates release notes for the GitHub release body and a cumulative `CHANGELOG.md`, which is included in the archive and uploaded as a release asset.
+Each release publishes a Linux x64 archive with both a versioned asset name and the stable `SteamDepotFS-linux-x64.tar.gz` asset name for `releases/latest` downloads. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside the archive.
 
 ## License
 

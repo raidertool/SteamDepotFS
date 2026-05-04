@@ -59,12 +59,24 @@ has_commits() {
 
 write_commit_list() {
   local log_range="$1"
+  local entries=()
 
   if has_commits "$log_range"; then
-    git log --format='- %s (%h)' --reverse "$log_range"
-  else
-    echo "- No user-facing changes."
+    while IFS= read -r commit_entry; do
+      entries+=("- $commit_entry")
+    done < <(
+      git log --format='%s (%h)' --reverse "$log_range" \
+        | grep -Ev '^chore\(release\): update changelog for v[0-9]+\.[0-9]+\.[0-9]+( |$)' \
+        || true
+    )
   fi
+
+  if ((${#entries[@]} > 0)); then
+    printf '%s\n' "${entries[@]}"
+    return
+  fi
+
+  echo "- No user-facing changes."
 }
 
 write_release_section() {
