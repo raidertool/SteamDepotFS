@@ -30,6 +30,12 @@ To build from source instead, install the .NET 8 SDK and run:
 dotnet build src/SteamDepotFs/SteamDepotFs.csproj -c Release
 ```
 
+Run the unit tests:
+
+```bash
+dotnet test tests/SteamDepotFs.Tests/SteamDepotFs.Tests.csproj -c Release
+```
+
 ## Usage
 
 List files in a depot:
@@ -95,12 +101,16 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
   --cache-dir /tmp/steam-depotfs-cache \
   --cache-max-bytes 8G \
   --cache-low-watermark 6G \
-  --cache-min-free-bytes 2G
+  --cache-min-free-bytes 2G \
+  --max-chunk-concurrency 4 \
+  --read-ahead-chunks 1
 ```
 
 `--cache-max-bytes` is the hard cap. `--cache-low-watermark` is the cache size to return to after eviction, not the amount of free disk space to keep. For example, with `--cache-max-bytes 8G` and `--cache-low-watermark 6G`, the cache can grow to 8 GiB; once a new chunk would exceed that cap, old chunks are evicted until the cache is back near 6 GiB.
 
 `--cache-min-free-bytes` is the free-space guard for the filesystem that contains the cache. If a single chunk is larger than the cache cap, it is served without being stored.
+
+`--max-chunk-concurrency` bounds concurrent chunk fetches and cache-miss CDN downloads across foreground reads and read-ahead. `--read-ahead-chunks` controls how many following depot chunks are prefetched after a read; set it to `0` to disable read-ahead.
 
 ## Testing
 
@@ -118,6 +128,14 @@ Run the public test script:
 CACHE_MAX_BYTES=8G CACHE_LOW_WATERMARK=6G CACHE_MIN_FREE_BYTES=2G REQUIRE_FUSE=1 \
   scripts/ci/test-steam-depotfs-public.sh
 ```
+
+To compare read-ahead and chunk-concurrency settings against a real depot path, run the benchmark matrix script:
+
+```bash
+scripts/bench/read-matrix.sh <app-id> <depot-id> <depot-path>
+```
+
+The script defaults to `--read-ahead-chunks` values `0 1 2`, `--max-chunk-concurrency` values `4 8 16`, and cold cache runs. Set `WARM_CACHE=1`, `ITERATIONS`, `OFFSET`, `LENGTH`, `READ_AHEAD_VALUES`, or `CONCURRENCY_VALUES` to tune the run.
 
 The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE, and verifies the file is visible through the mounted filesystem.
 

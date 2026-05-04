@@ -20,6 +20,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Run unit tests
+        run: dotnet test tests/SteamDepotFs.Tests/SteamDepotFs.Tests.csproj -c Release
+
       - name: Install FUSE
         run: |
           sudo apt-get update
@@ -124,3 +127,22 @@ jobs:
           STEAM_DEPOTFS_AUTH_MANIFEST_ID: ${{ vars.STEAM_DEPOTFS_AUTH_MANIFEST_ID }}
           STEAM_DEPOTFS_AUTH_READ_PATH: ${{ vars.STEAM_DEPOTFS_AUTH_READ_PATH }}
           STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH: ${{ secrets.STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH }}
+
+      - name: Benchmark authenticated Steam depot access
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.auth-config.outputs.configured == 'true' }}
+        run: scripts/ci/benchmark-auth-depot.sh
+        env:
+          CACHE_MAX_BYTES: 8G
+          CACHE_LOW_WATERMARK: 6G
+          CACHE_MIN_FREE_BYTES: 2G
+          STEAM_LOGIN_ID: ${{ vars.STEAM_LOGIN_ID }}
+          STEAM_DEPOTFS_AUTH_APP_ID: ${{ vars.STEAM_DEPOTFS_AUTH_APP_ID }}
+          STEAM_DEPOTFS_AUTH_DEPOT_ID: ${{ vars.STEAM_DEPOTFS_AUTH_DEPOT_ID }}
+          STEAM_DEPOTFS_AUTH_BRANCH: ${{ vars.STEAM_DEPOTFS_AUTH_BRANCH }}
+          STEAM_DEPOTFS_AUTH_MANIFEST_ID: ${{ vars.STEAM_DEPOTFS_AUTH_MANIFEST_ID }}
+          STEAM_DEPOTFS_AUTH_READ_PATH: ${{ vars.STEAM_DEPOTFS_AUTH_READ_PATH }}
+          STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH: ${{ secrets.STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH }}
+          READ_AHEAD_VALUES: 0 1 2
+          CONCURRENCY_VALUES: 4 8 16
+          ITERATIONS: 1
+          LENGTH: 67108864

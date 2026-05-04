@@ -1,4 +1,4 @@
-using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using Mono.Fuse.NETStandard;
@@ -34,6 +34,7 @@ internal static class Program
             {
                 "smoke" => await RunSmokeAsync(options, cts.Token),
                 "list" => await RunListAsync(options, parsed, cts.Token),
+                "inspect" => await RunInspectAsync(options, parsed, cts.Token),
                 "read" => await RunReadAsync(options, parsed, cts.Token),
                 "mount" => await RunMountAsync(options, parsed, cts.Token),
                 _ => UnknownCommand(command)
@@ -101,6 +102,58 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static async Task<int> RunInspectAsync(DepotOptions options, ParsedArgs parsed, CancellationToken cancellationToken)
+    {
+        var path = parsed.Get("--path") ?? parsed.Positionals.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("inspect requires --path <depot-path>.");
+        }
+
+        await using var depot = await DepotReader.OpenAsync(options, cancellationToken);
+        if (!depot.Index.TryGetFile(path, out var file))
+        {
+            throw new FileNotFoundException($"Path not found in depot: {path}");
+        }
+
+        var chunkLimit = parsed.GetInt("--chunks") ?? 12;
+        var chunks = file.Chunks;
+        var manifestOrderIsSorted = ChunkOrdering.IsOffsetOrdered(chunks, static chunk => (long)chunk.Offset);
+        var coveredBytes = chunks.Aggregate(0UL, static (total, chunk) => total + chunk.UncompressedLength);
+        var minOffset = chunks.Count == 0 ? 0 : chunks.Min(static chunk => chunk.Offset);
+        var maxEnd = chunks.Count == 0 ? 0 : chunks.Max(static chunk => chunk.Offset + chunk.UncompressedLength);
+        var firstCoveringZero = chunks
+            .Select((chunk, index) => (chunk, index))
+            .Where(static item => item.chunk.Offset == 0 && item.chunk.UncompressedLength > 0)
+            .Select(static item => item.index)
+            .FirstOrDefault(-1);
+
+        Console.WriteLine($"path={file.FileName}");
+        Console.WriteLine($"flags={file.Flags}");
+        Console.WriteLine($"total_size={file.TotalSize}");
+        Console.WriteLine($"chunks={chunks.Count}");
+        Console.WriteLine($"covered_bytes={coveredBytes}");
+        Console.WriteLine($"min_chunk_offset={minOffset}");
+        Console.WriteLine($"max_chunk_end={maxEnd}");
+        Console.WriteLine($"manifest_order_sorted={manifestOrderIsSorted}");
+        Console.WriteLine($"first_manifest_chunk_covering_offset_0={firstCoveringZero}");
+        Console.WriteLine($"link_target={file.LinkTarget ?? string.Empty}");
+        Console.WriteLine("manifest_order_chunks:");
+        PrintChunks(chunks.Select((chunk, index) => (chunk, index)).Take(chunkLimit));
+        Console.WriteLine("offset_order_chunks:");
+        PrintChunks(chunks.Select((chunk, index) => (chunk, index)).OrderBy(static item => item.chunk.Offset).Take(chunkLimit));
+        return 0;
+    }
+
+    private static void PrintChunks(IEnumerable<(DepotManifest.ChunkData chunk, int index)> chunks)
+    {
+        foreach (var (chunk, index) in chunks)
+        {
+            var chunkId = chunk.ChunkID is null ? "" : Convert.ToHexString(chunk.ChunkID).ToLowerInvariant();
+            Console.WriteLine($"  index={index} offset={chunk.Offset} uncompressed={chunk.UncompressedLength} compressed={chunk.CompressedLength} checksum={chunk.Checksum} chunk_id={chunkId}");
+        }
     }
 
     private static async Task<int> RunReadAsync(DepotOptions options, ParsedArgs parsed, CancellationToken cancellationToken)
@@ -185,6 +238,7 @@ internal static class Program
         Commands:
           smoke                         Connect anonymously by default, resolve a manifest, and read one file.
           list [--limit N]              List paths from the manifest.
+          inspect --path PATH           Print manifest metadata and chunk layout for a depot path.
           read --path PATH [--out FILE] Read a depot path, optionally with --offset and --length.
           mount --mount-point DIR       Mount the depot read-only through Linux FUSE.
 
@@ -198,6 +252,8 @@ internal static class Program
           --cache-max-bytes SIZE        Hard cache cap. Default: 5G.
           --cache-low-watermark SIZE    Eviction target after crossing cap. Default: 80% of max.
           --cache-min-free-bytes SIZE   Free-space guard for the cache filesystem. Default: 1G.
+          --max-chunk-concurrency N     Max concurrent chunk fetches/downloads. Default: 4.
+          --read-ahead-chunks N         Chunks to prefetch after reads. Use 0 to disable. Default: 1.
           --username NAME               Steam username. Env: STEAM_USERNAME.
           --password VALUE              Steam password. Env: STEAM_PASSWORD.
           --auth-code VALUE             Steam Guard email code. Env: STEAM_AUTH_CODE.
@@ -239,6 +295,8 @@ internal sealed record DepotOptions
     public long CacheMinFreeBytes { get; init; } = SizeParser.Parse("1G");
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(5);
     public int MaxServers { get; init; } = 12;
+    public int MaxChunkConcurrency { get; init; } = 4;
+    public int ReadAheadChunks { get; init; } = 1;
     public SteamCredentials Credentials { get; init; } = SteamCredentials.FromEnvironment();
 
     public static DepotOptions From(ParsedArgs parsed)
@@ -259,6 +317,8 @@ internal sealed record DepotOptions
             CacheMinFreeBytes = parsed.GetSize("--cache-min-free-bytes") ?? SizeParser.Parse("1G"),
             Timeout = TimeSpan.FromSeconds(parsed.GetInt("--timeout") ?? 300),
             MaxServers = parsed.GetInt("--max-servers") ?? 12,
+            MaxChunkConcurrency = Math.Clamp(parsed.GetInt("--max-chunk-concurrency") ?? 4, 1, 64),
+            ReadAheadChunks = Math.Clamp(parsed.GetInt("--read-ahead-chunks") ?? 1, 0, 16),
             Credentials = SteamCredentials.From(parsed)
         };
     }
@@ -327,6 +387,9 @@ internal sealed class DepotReader : IAsyncDisposable
     private readonly byte[] _depotKey;
     private readonly List<Server> _servers;
     private readonly Dictionary<string, string?> _cdnTokens = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _cdnTokenGate = new(1, 1);
+    private readonly SemaphoreSlim _downloadGate;
+    private readonly ConcurrentDictionary<string, DepotManifest.ChunkData[]> _orderedChunksByPath = new(StringComparer.Ordinal);
     private int _serverCursor;
 
     private DepotReader(
@@ -346,12 +409,22 @@ internal sealed class DepotReader : IAsyncDisposable
         _servers = servers;
         Cache = cache;
         Index = FileIndex.FromManifest(manifest);
+        _downloadGate = new SemaphoreSlim(options.MaxChunkConcurrency, options.MaxChunkConcurrency);
+        Prefetcher = new ChunkPrefetcher<DepotManifest.ChunkData>(
+            options.ReadAheadChunks,
+            chunk => ChunkKey(chunk, out _),
+            async (chunk, ct) =>
+            {
+                await GetChunkAsync(chunk, ct);
+            },
+            Cache.Stats);
     }
 
     public DepotOptions Options { get; }
     public DepotManifest Manifest { get; }
     public FileIndex Index { get; }
     public ChunkCache Cache { get; }
+    private ChunkPrefetcher<DepotManifest.ChunkData> Prefetcher { get; }
 
     public static async Task<DepotReader> OpenAsync(DepotOptions options, CancellationToken cancellationToken)
     {
@@ -395,58 +468,48 @@ internal sealed class DepotReader : IAsyncDisposable
 
     public async Task<int> ReadAsync(DepotManifest.FileData file, long offset, byte[] destination, CancellationToken cancellationToken)
     {
-        if (offset < 0)
+        var chunks = ChunksInFileOffsetOrder(file);
+        return await ChunkReadPipeline.ReadAsync(
+            chunks,
+            file.TotalSize,
+            offset,
+            destination,
+            Options.MaxChunkConcurrency,
+            static chunk => (long)chunk.Offset,
+            static chunk => chunk.UncompressedLength,
+            GetChunkAsync,
+            lastChunkIndex => Prefetcher.Schedule(chunks, lastChunkIndex),
+            cancellationToken);
+    }
+
+    private IReadOnlyList<DepotManifest.ChunkData> ChunksInFileOffsetOrder(DepotManifest.FileData file)
+    {
+        var chunks = file.Chunks;
+        if (chunks.Count < 2)
         {
-            throw new ArgumentOutOfRangeException(nameof(offset));
+            return chunks;
         }
 
-        if ((ulong)offset >= file.TotalSize || destination.Length == 0)
+        var fileName = file.FileName;
+        if (string.IsNullOrEmpty(fileName))
         {
-            return 0;
+            return ChunkOrdering.EnsureOffsetOrder(chunks, static chunk => (long)chunk.Offset);
         }
 
-        var end = Math.Min((long)file.TotalSize, offset + destination.Length);
-        var written = 0;
-
-        foreach (var chunk in file.Chunks)
-        {
-            var chunkStart = (long)chunk.Offset;
-            var chunkEnd = chunkStart + chunk.UncompressedLength;
-            if (chunkEnd <= offset)
-            {
-                continue;
-            }
-
-            if (chunkStart >= end)
-            {
-                break;
-            }
-
-            var readStart = Math.Max(offset, chunkStart);
-            var readEnd = Math.Min(end, chunkEnd);
-            var readLength = (int)(readEnd - readStart);
-            var chunkBytes = await GetChunkAsync(chunk, cancellationToken);
-            Buffer.BlockCopy(chunkBytes, (int)(readStart - chunkStart), destination, written, readLength);
-            written += readLength;
-        }
-
-        return written;
+        return _orderedChunksByPath.GetOrAdd(
+            fileName,
+            _ => ChunkOrdering.EnsureOffsetOrder(chunks, static chunk => (long)chunk.Offset).ToArray());
     }
 
     private async Task<byte[]> GetChunkAsync(DepotManifest.ChunkData chunk, CancellationToken cancellationToken)
     {
-        if (chunk.ChunkID is null)
-        {
-            throw new InvalidDataException("Manifest chunk is missing its chunk id.");
-        }
-
-        var chunkId = Hex(chunk.ChunkID);
-        var key = $"{Options.DepotId}/{chunkId}";
+        var key = ChunkKey(chunk, out var chunkId);
         return await Cache.GetOrAddAsync(key, chunk.UncompressedLength, async ct =>
         {
-            var buffer = ArrayPool<byte>.Shared.Rent((int)chunk.UncompressedLength);
+            await _downloadGate.WaitAsync(ct);
             try
             {
+                var buffer = new byte[(int)chunk.UncompressedLength];
                 Exception? lastFailure = null;
                 for (var attempt = 0; attempt < _servers.Count; attempt++)
                 {
@@ -468,9 +531,7 @@ internal sealed class DepotReader : IAsyncDisposable
                             throw new InvalidDataException($"Chunk {chunkId} returned {bytes} bytes; expected {chunk.UncompressedLength}.");
                         }
 
-                        var result = new byte[bytes];
-                        Buffer.BlockCopy(buffer, 0, result, 0, bytes);
-                        return result;
+                        return buffer;
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -482,7 +543,7 @@ internal sealed class DepotReader : IAsyncDisposable
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                _downloadGate.Release();
             }
         }, cancellationToken);
     }
@@ -496,23 +557,315 @@ internal sealed class DepotReader : IAsyncDisposable
     private async Task<string?> GetCachedCdnTokenAsync(Server server, CancellationToken cancellationToken)
     {
         var host = server.Host ?? server.VHost ?? server.ToString();
-        if (_cdnTokens.TryGetValue(host, out var token))
+        await _cdnTokenGate.WaitAsync(cancellationToken);
+        try
         {
+            if (_cdnTokens.TryGetValue(host, out var token))
+            {
+                return token;
+            }
+
+            token = await _steam.TryGetCdnTokenAsync(Options.AppId, Options.DepotId, server, cancellationToken);
+            _cdnTokens[host] = token;
             return token;
         }
-
-        token = await _steam.TryGetCdnTokenAsync(Options.AppId, Options.DepotId, server, cancellationToken);
-        _cdnTokens[host] = token;
-        return token;
+        finally
+        {
+            _cdnTokenGate.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
+        await Prefetcher.DisposeAsync();
+        _downloadGate.Dispose();
+        _cdnTokenGate.Dispose();
         _cdn.Dispose();
         await _steam.DisposeAsync();
     }
 
+    private string ChunkKey(DepotManifest.ChunkData chunk, out string chunkId)
+    {
+        if (chunk.ChunkID is null)
+        {
+            throw new InvalidDataException("Manifest chunk is missing its chunk id.");
+        }
+
+        chunkId = Hex(chunk.ChunkID);
+        return $"{Options.DepotId}/{chunkId}";
+    }
+
     private static string Hex(byte[] value) => Convert.ToHexString(value).ToLowerInvariant();
+
+}
+
+internal static class ChunkReadPipeline
+{
+    public static async Task<int> ReadAsync<TChunk>(
+        IReadOnlyList<TChunk> chunks,
+        ulong totalSize,
+        long offset,
+        byte[] destination,
+        int maxConcurrency,
+        Func<TChunk, long> chunkOffset,
+        Func<TChunk, long> chunkLength,
+        Func<TChunk, CancellationToken, Task<byte[]>> fetchChunk,
+        Action<int>? afterRead,
+        CancellationToken cancellationToken)
+    {
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        }
+
+        if ((ulong)offset >= totalSize || destination.Length == 0)
+        {
+            return 0;
+        }
+
+        var end = Math.Min((long)totalSize, offset + destination.Length);
+        var reads = new List<ChunkRead<TChunk>>();
+        var written = 0;
+
+        for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+        {
+            var chunk = chunks[chunkIndex];
+            var currentChunkOffset = chunkOffset(chunk);
+            var currentChunkLength = chunkLength(chunk);
+            var chunkEnd = currentChunkOffset + currentChunkLength;
+            if (chunkEnd <= offset)
+            {
+                continue;
+            }
+
+            if (currentChunkOffset >= end)
+            {
+                break;
+            }
+
+            var readStart = Math.Max(offset, currentChunkOffset);
+            var readEnd = Math.Min(end, chunkEnd);
+            var readLength = (int)(readEnd - readStart);
+            reads.Add(new ChunkRead<TChunk>(
+                chunkIndex,
+                chunk,
+                currentChunkOffset,
+                readStart,
+                (int)(readStart - offset),
+                readLength));
+            written += readLength;
+        }
+
+        if (reads.Count == 0)
+        {
+            return 0;
+        }
+
+        var chunkBytes = await FetchChunksAsync(
+            reads,
+            Math.Max(1, maxConcurrency),
+            fetchChunk,
+            cancellationToken);
+
+        for (var i = 0; i < reads.Count; i++)
+        {
+            var read = reads[i];
+            Buffer.BlockCopy(
+                chunkBytes[i],
+                (int)(read.ReadStart - read.ChunkStart),
+                destination,
+                read.DestinationOffset,
+                read.Length);
+        }
+
+        afterRead?.Invoke(reads[^1].ChunkIndex);
+        return written;
+    }
+
+    private static async Task<byte[][]> FetchChunksAsync<TChunk>(
+        IReadOnlyList<ChunkRead<TChunk>> reads,
+        int maxConcurrency,
+        Func<TChunk, CancellationToken, Task<byte[]>> fetchChunk,
+        CancellationToken cancellationToken)
+    {
+        var results = new byte[reads.Count][];
+        if (reads.Count == 1 || maxConcurrency == 1)
+        {
+            for (var i = 0; i < reads.Count; i++)
+            {
+                results[i] = await fetchChunk(reads[i].Chunk, cancellationToken);
+            }
+
+            return results;
+        }
+
+        using var readGate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var tasks = new Task[reads.Count];
+        for (var i = 0; i < reads.Count; i++)
+        {
+            var index = i;
+            tasks[index] = FetchOneAsync(index);
+        }
+
+        await Task.WhenAll(tasks);
+        return results;
+
+        async Task FetchOneAsync(int index)
+        {
+            await readGate.WaitAsync(cancellationToken);
+            try
+            {
+                results[index] = await fetchChunk(reads[index].Chunk, cancellationToken);
+            }
+            finally
+            {
+                readGate.Release();
+            }
+        }
+    }
+
+    private readonly record struct ChunkRead<TChunk>(
+        int ChunkIndex,
+        TChunk Chunk,
+        long ChunkStart,
+        long ReadStart,
+        int DestinationOffset,
+        int Length);
+}
+
+internal static class ChunkOrdering
+{
+    public static IReadOnlyList<TChunk> EnsureOffsetOrder<TChunk>(
+        IReadOnlyList<TChunk> chunks,
+        Func<TChunk, long> chunkOffset)
+    {
+        if (chunks.Count < 2 || IsOffsetOrdered(chunks, chunkOffset))
+        {
+            return chunks;
+        }
+
+        return chunks.OrderBy(chunkOffset).ToArray();
+    }
+
+    public static bool IsOffsetOrdered<TChunk>(
+        IReadOnlyList<TChunk> chunks,
+        Func<TChunk, long> chunkOffset)
+    {
+        if (chunks.Count < 2)
+        {
+            return true;
+        }
+
+        var previousOffset = chunkOffset(chunks[0]);
+        for (var i = 1; i < chunks.Count; i++)
+        {
+            var currentOffset = chunkOffset(chunks[i]);
+            if (currentOffset < previousOffset)
+            {
+                return false;
+            }
+
+            previousOffset = currentOffset;
+        }
+
+        return true;
+    }
+}
+
+internal sealed class ChunkPrefetcher<TChunk> : IAsyncDisposable
+{
+    private readonly int _readAheadChunks;
+    private readonly Func<TChunk, string> _keyForChunk;
+    private readonly Func<TChunk, CancellationToken, Task> _prefetchChunk;
+    private readonly CacheStats _stats;
+    private readonly ConcurrentDictionary<string, Task> _prefetches = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _cts = new();
+
+    public ChunkPrefetcher(
+        int readAheadChunks,
+        Func<TChunk, string> keyForChunk,
+        Func<TChunk, CancellationToken, Task> prefetchChunk,
+        CacheStats stats)
+    {
+        _readAheadChunks = Math.Max(0, readAheadChunks);
+        _keyForChunk = keyForChunk;
+        _prefetchChunk = prefetchChunk;
+        _stats = stats;
+    }
+
+    public void Schedule(IReadOnlyList<TChunk> chunks, int chunkIndex)
+    {
+        if (_readAheadChunks <= 0)
+        {
+            return;
+        }
+
+        for (var offset = 1; offset <= _readAheadChunks; offset++)
+        {
+            var nextIndex = chunkIndex + offset;
+            if (nextIndex >= chunks.Count)
+            {
+                break;
+            }
+
+            var chunk = chunks[nextIndex];
+            string key;
+            try
+            {
+                key = _keyForChunk(chunk);
+            }
+            catch
+            {
+                _stats.RecordPrefetchFailed();
+                continue;
+            }
+
+            if (!_prefetches.TryAdd(key, Task.CompletedTask))
+            {
+                _stats.RecordPrefetchSkipped();
+                continue;
+            }
+
+            _stats.RecordPrefetchScheduled();
+            _prefetches[key] = Task.Run(async () =>
+            {
+                try
+                {
+                    await _prefetchChunk(chunk, _cts.Token);
+                    _stats.RecordPrefetchCompleted();
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch
+                {
+                    _stats.RecordPrefetchFailed();
+                }
+                finally
+                {
+                    _prefetches.TryRemove(key, out _);
+                }
+            }, CancellationToken.None);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        var prefetches = _prefetches.Values.Where(static task => !task.IsCompleted).ToArray();
+        if (prefetches.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(prefetches);
+            }
+            catch
+            {
+            }
+        }
+
+        _cts.Dispose();
+    }
 }
 
 internal sealed class SteamSession : IAsyncDisposable
@@ -730,6 +1083,7 @@ internal sealed class ChunkCache
     private readonly long _minFreeBytes;
     private readonly Dictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
     private readonly object _locksGate = new();
+    private readonly SemaphoreSlim _storeGate = new(1, 1);
 
     public ChunkCache(string root, long maxBytes, long lowWatermarkBytes, long minFreeBytes)
     {
@@ -749,21 +1103,32 @@ internal sealed class ChunkCache
         await gate.WaitAsync(cancellationToken);
         try
         {
-            if (TryRead(path, expectedLength, out var cached))
+            var cached = await TryReadAsync(path, expectedLength, cancellationToken);
+            if (cached is not null)
             {
-                Stats.Hits++;
-                Stats.BytesReadFromCache += cached.Length;
+                Stats.RecordHit(cached.Length);
                 return cached;
             }
 
-            Stats.Misses++;
+            Stats.RecordMiss();
             var bytes = await download(cancellationToken);
-            Stats.BytesDownloaded += bytes.Length;
+            Stats.RecordDownloaded(bytes.Length);
 
-            if (bytes.LongLength == expectedLength && await CanStoreAsync(bytes.LongLength, cancellationToken))
+            if (bytes.LongLength == expectedLength)
             {
-                await StoreAsync(path, bytes, cancellationToken);
-                Stats.Stored++;
+                await _storeGate.WaitAsync(cancellationToken);
+                try
+                {
+                    if (await CanStoreAsync(bytes.LongLength, cancellationToken))
+                    {
+                        await StoreAsync(path, bytes, cancellationToken);
+                        Stats.RecordStored();
+                    }
+                }
+                finally
+                {
+                    _storeGate.Release();
+                }
             }
 
             return bytes;
@@ -774,18 +1139,33 @@ internal sealed class ChunkCache
         }
     }
 
-    private bool TryRead(string path, long expectedLength, [NotNullWhen(true)] out byte[]? bytes)
+    private static async Task<byte[]?> TryReadAsync(string path, long expectedLength, CancellationToken cancellationToken)
     {
-        bytes = null;
         var file = new FileInfo(path);
         if (!file.Exists || file.Length != expectedLength)
         {
-            return false;
+            return null;
         }
 
-        bytes = File.ReadAllBytes(path);
-        File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
-        return true;
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            if (bytes.LongLength != expectedLength)
+            {
+                return null;
+            }
+
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+            return bytes;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private async Task<bool> CanStoreAsync(long incomingBytes, CancellationToken cancellationToken)
@@ -828,8 +1208,7 @@ internal sealed class ChunkCache
             {
                 var length = file.Length;
                 file.Delete();
-                Stats.Evicted++;
-                Stats.BytesEvicted += length;
+                Stats.RecordEvicted(length);
                 cacheBytes -= length;
                 freeBytes += length;
             }
@@ -881,16 +1260,65 @@ internal sealed class ChunkCache
 
 internal sealed class CacheStats
 {
-    public long Hits { get; set; }
-    public long Misses { get; set; }
-    public long Stored { get; set; }
-    public long Evicted { get; set; }
-    public long BytesDownloaded { get; set; }
-    public long BytesReadFromCache { get; set; }
-    public long BytesEvicted { get; set; }
+    private long _hits;
+    private long _misses;
+    private long _stored;
+    private long _evicted;
+    private long _bytesDownloaded;
+    private long _bytesReadFromCache;
+    private long _bytesEvicted;
+    private long _prefetchScheduled;
+    private long _prefetchCompleted;
+    private long _prefetchSkipped;
+    private long _prefetchFailed;
+
+    public long Hits => Volatile.Read(ref _hits);
+    public long Misses => Volatile.Read(ref _misses);
+    public long Stored => Volatile.Read(ref _stored);
+    public long Evicted => Volatile.Read(ref _evicted);
+    public long BytesDownloaded => Volatile.Read(ref _bytesDownloaded);
+    public long BytesReadFromCache => Volatile.Read(ref _bytesReadFromCache);
+    public long BytesEvicted => Volatile.Read(ref _bytesEvicted);
+    public long PrefetchScheduled => Volatile.Read(ref _prefetchScheduled);
+    public long PrefetchCompleted => Volatile.Read(ref _prefetchCompleted);
+    public long PrefetchSkipped => Volatile.Read(ref _prefetchSkipped);
+    public long PrefetchFailed => Volatile.Read(ref _prefetchFailed);
+
+    public void RecordHit(long bytes)
+    {
+        Interlocked.Increment(ref _hits);
+        Interlocked.Add(ref _bytesReadFromCache, bytes);
+    }
+
+    public void RecordMiss()
+        => Interlocked.Increment(ref _misses);
+
+    public void RecordStored()
+        => Interlocked.Increment(ref _stored);
+
+    public void RecordEvicted(long bytes)
+    {
+        Interlocked.Increment(ref _evicted);
+        Interlocked.Add(ref _bytesEvicted, bytes);
+    }
+
+    public void RecordDownloaded(long bytes)
+        => Interlocked.Add(ref _bytesDownloaded, bytes);
+
+    public void RecordPrefetchScheduled()
+        => Interlocked.Increment(ref _prefetchScheduled);
+
+    public void RecordPrefetchCompleted()
+        => Interlocked.Increment(ref _prefetchCompleted);
+
+    public void RecordPrefetchSkipped()
+        => Interlocked.Increment(ref _prefetchSkipped);
+
+    public void RecordPrefetchFailed()
+        => Interlocked.Increment(ref _prefetchFailed);
 
     public string Format()
-        => $"cache hits={Hits} misses={Misses} stored={Stored} evicted={Evicted} downloaded={BytesDownloaded} read_from_cache={BytesReadFromCache} evicted_bytes={BytesEvicted}";
+        => $"cache hits={Hits} misses={Misses} stored={Stored} evicted={Evicted} downloaded={BytesDownloaded} read_from_cache={BytesReadFromCache} evicted_bytes={BytesEvicted} prefetch_scheduled={PrefetchScheduled} prefetch_completed={PrefetchCompleted} prefetch_skipped={PrefetchSkipped} prefetch_failed={PrefetchFailed}";
 }
 
 internal sealed class FileIndex
