@@ -1,0 +1,14 @@
+bin/
+obj/
+.tmp/
+.vs/
+.vscode/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+
+# Local SteamDepotFs cache and outputs.
+steam-depotfs-cache/
+steam-depotfs-mount/
+steam-depotfs-installscript.vdf
