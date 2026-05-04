@@ -17,6 +17,7 @@ READ_PATH="${STEAM_DEPOTFS_BENCH_READ_PATH:-${STEAM_DEPOTFS_AUTH_READ_PATH:-}}"
 BRANCH_PASSWORD_HASH="${STEAM_DEPOTFS_AUTH_BRANCH_PASSWORD_HASH:-}"
 TIMEOUT="${STEAM_DEPOTFS_AUTH_TIMEOUT:-600}"
 LIST_LIMIT="${STEAM_DEPOTFS_BENCH_LIST_LIMIT:-200000}"
+INSPECT_CANDIDATES="${STEAM_DEPOTFS_BENCH_INSPECT_CANDIDATES:-5}"
 
 if [[ -z "${STEAM_USERNAME:-}" && -z "${STEAM_ACCESS_TOKEN:-}" ]]; then
   echo "Authenticated benchmark requires STEAM_USERNAME or STEAM_ACCESS_TOKEN." >&2
@@ -69,10 +70,22 @@ if [[ -z "$READ_PATH" ]]; then
     }
   ' "$LIST_FILE" | sort -nr >"$CANDIDATES_FILE"
 
+  inspected=0
   while IFS=$'\t' read -r candidate_size candidate_path; do
     PROBE_FILE="$WORK_ROOT/steam-depotfs-auth-benchmark-probe.bin"
     rm -f "$PROBE_FILE"
     echo "Probing candidate size=$candidate_size path=$candidate_path"
+    if (( inspected < INSPECT_CANDIDATES )); then
+      dotnet run --no-build --project "$PROJECT" -c Release -- inspect \
+        --app "$APP_ID" \
+        --depot "$DEPOT_ID" \
+        --path "$candidate_path" \
+        --chunks 8 \
+        --cache-dir "$CACHE_DIR/inspect-cache" \
+        "${COMMON_ARGS[@]}"
+      inspected=$((inspected + 1))
+    fi
+
     dotnet run --no-build --project "$PROJECT" -c Release -- read \
       --app "$APP_ID" \
       --depot "$DEPOT_ID" \
@@ -122,6 +135,13 @@ export CACHE_ROOT="${CACHE_ROOT:-$WORK_ROOT/steam-depotfs-auth-benchmark-matrix}
 
 echo "Benchmarking app=$APP_ID depot=$DEPOT_ID branch=$BRANCH path=$READ_PATH length=$LENGTH"
 echo "Matrix read_ahead=[$READ_AHEAD_VALUES] concurrency=[$CONCURRENCY_VALUES] iterations=$ITERATIONS"
+dotnet run --no-build --project "$PROJECT" -c Release -- inspect \
+  --app "$APP_ID" \
+  --depot "$DEPOT_ID" \
+  --path "$READ_PATH" \
+  --chunks 12 \
+  --cache-dir "$CACHE_DIR/inspect-selected-cache" \
+  "${COMMON_ARGS[@]}"
 
 RESULTS_FILE="$WORK_ROOT/steam-depotfs-auth-benchmark-results.csv"
 "$ROOT/scripts/bench/read-matrix.sh" "$APP_ID" "$DEPOT_ID" "$READ_PATH" "${COMMON_ARGS[@]}" | tee "$RESULTS_FILE"

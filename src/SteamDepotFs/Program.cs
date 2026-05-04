@@ -34,6 +34,7 @@ internal static class Program
             {
                 "smoke" => await RunSmokeAsync(options, cts.Token),
                 "list" => await RunListAsync(options, parsed, cts.Token),
+                "inspect" => await RunInspectAsync(options, parsed, cts.Token),
                 "read" => await RunReadAsync(options, parsed, cts.Token),
                 "mount" => await RunMountAsync(options, parsed, cts.Token),
                 _ => UnknownCommand(command)
@@ -101,6 +102,60 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static async Task<int> RunInspectAsync(DepotOptions options, ParsedArgs parsed, CancellationToken cancellationToken)
+    {
+        var path = parsed.Get("--path") ?? parsed.Positionals.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("inspect requires --path <depot-path>.");
+        }
+
+        await using var depot = await DepotReader.OpenAsync(options, cancellationToken);
+        if (!depot.Index.TryGetFile(path, out var file))
+        {
+            throw new FileNotFoundException($"Path not found in depot: {path}");
+        }
+
+        var chunkLimit = parsed.GetInt("--chunks") ?? 12;
+        var chunks = file.Chunks;
+        var manifestOrderIsSorted = chunks
+            .Zip(chunks.Skip(1), static (left, right) => left.Offset <= right.Offset)
+            .All(static sorted => sorted);
+        var coveredBytes = chunks.Aggregate(0UL, static (total, chunk) => total + chunk.UncompressedLength);
+        var minOffset = chunks.Count == 0 ? 0 : chunks.Min(static chunk => chunk.Offset);
+        var maxEnd = chunks.Count == 0 ? 0 : chunks.Max(static chunk => chunk.Offset + chunk.UncompressedLength);
+        var firstCoveringZero = chunks
+            .Select((chunk, index) => (chunk, index))
+            .Where(static item => item.chunk.Offset == 0 && item.chunk.UncompressedLength > 0)
+            .Select(static item => item.index)
+            .FirstOrDefault(-1);
+
+        Console.WriteLine($"path={file.FileName}");
+        Console.WriteLine($"flags={file.Flags}");
+        Console.WriteLine($"total_size={file.TotalSize}");
+        Console.WriteLine($"chunks={chunks.Count}");
+        Console.WriteLine($"covered_bytes={coveredBytes}");
+        Console.WriteLine($"min_chunk_offset={minOffset}");
+        Console.WriteLine($"max_chunk_end={maxEnd}");
+        Console.WriteLine($"manifest_order_sorted={manifestOrderIsSorted}");
+        Console.WriteLine($"first_manifest_chunk_covering_offset_0={firstCoveringZero}");
+        Console.WriteLine($"link_target={file.LinkTarget ?? string.Empty}");
+        Console.WriteLine("manifest_order_chunks:");
+        PrintChunks(chunks.Select((chunk, index) => (chunk, index)).Take(chunkLimit));
+        Console.WriteLine("offset_order_chunks:");
+        PrintChunks(chunks.Select((chunk, index) => (chunk, index)).OrderBy(static item => item.chunk.Offset).Take(chunkLimit));
+        return 0;
+    }
+
+    private static void PrintChunks(IEnumerable<(DepotManifest.ChunkData chunk, int index)> chunks)
+    {
+        foreach (var (chunk, index) in chunks)
+        {
+            var chunkId = chunk.ChunkID is null ? "" : Convert.ToHexString(chunk.ChunkID).ToLowerInvariant();
+            Console.WriteLine($"  index={index} offset={chunk.Offset} uncompressed={chunk.UncompressedLength} compressed={chunk.CompressedLength} checksum={chunk.Checksum} chunk_id={chunkId}");
+        }
     }
 
     private static async Task<int> RunReadAsync(DepotOptions options, ParsedArgs parsed, CancellationToken cancellationToken)
@@ -185,6 +240,7 @@ internal static class Program
         Commands:
           smoke                         Connect anonymously by default, resolve a manifest, and read one file.
           list [--limit N]              List paths from the manifest.
+          inspect --path PATH           Print manifest metadata and chunk layout for a depot path.
           read --path PATH [--out FILE] Read a depot path, optionally with --offset and --length.
           mount --mount-point DIR       Mount the depot read-only through Linux FUSE.
 
