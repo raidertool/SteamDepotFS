@@ -37,9 +37,13 @@ sudo apt-get install -y fuse3 libfuse2
 sudo modprobe fuse || true
 ```
 
-The `smoke`, `list`, `inspect`, and `read` commands do not require WinFsp or FUSE. Only `mount` requires an OS filesystem driver.
+For mounted filesystem access on macOS, install macFUSE:
 
-macOS release binaries currently support `smoke`, `list`, `inspect`, and `read`. macOS `mount` is not implemented yet; use Windows with WinFsp or Linux with FUSE for mounted filesystem access.
+https://macfuse.github.io/
+
+On macOS 15.4 or later with macFUSE 5 or later, mount under `/Volumes/<name>` to use macFUSE's FSKit backend. Other macOS mount points use the kernel backend and may require approving the macFUSE system extension.
+
+The `smoke`, `list`, `inspect`, and `read` commands do not require WinFsp or FUSE. Only `mount` requires an OS filesystem driver.
 
 To build from source instead, install the .NET 8 SDK and run:
 
@@ -97,6 +101,12 @@ Unmount on Linux:
 
 ```bash
 fusermount3 -u /tmp/steam-depotfs
+```
+
+Unmount on macOS:
+
+```bash
+diskutil unmount /tmp/steam-depotfs
 ```
 
 Unmount on Windows by stopping the SteamDepotFS process, for example with `Ctrl+C` in the terminal running `mount`.
@@ -165,7 +175,7 @@ scripts/bench/read-matrix.sh <app-id> <depot-id> <depot-path>
 
 The script defaults to `--read-ahead-chunks` values `0 1 2`, `--max-chunk-concurrency` values `4 8 16`, and cold cache runs. Set `WARM_CACHE=1`, `ITERATIONS`, `OFFSET`, `LENGTH`, `READ_AHEAD_VALUES`, or `CONCURRENCY_VALUES` to tune the run.
 
-The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE, and verifies the file is visible through the mounted filesystem.
+The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE, and verifies the file is visible through the mounted filesystem. Manual runs also test WinFsp on Windows and macFUSE on macOS hosted runners.
 
 The workflow also includes an authenticated smoke test for pushes and manual runs. It logs in with configured Steam credentials, resolves the configured depot, and reads a small file from that depot. Configure either:
 

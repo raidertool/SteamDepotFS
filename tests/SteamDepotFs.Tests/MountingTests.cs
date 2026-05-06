@@ -1,4 +1,5 @@
 using Xunit;
+using System.Reflection;
 
 namespace SteamDepotFs.Tests;
 
@@ -29,5 +30,47 @@ public sealed class MountingTests
 
         Assert.False(result.Succeeded);
         Assert.Contains("mount requires --mount-point", result.Errors[0]);
+    }
+
+    [Theory]
+    [InlineData("/Volumes/SteamDepotFS-Test")]
+    [InlineData("/Volumes/SteamDepotFS-Test/Nested")]
+    public void IsFSKitMountPoint_AcceptsVolumesPaths(string mountPoint)
+    {
+        var result = TryInvokeIsFSKitMountPoint(mountPoint);
+        if (result is null)
+        {
+            return;
+        }
+
+        Assert.True(result.Value);
+    }
+
+    [Theory]
+    [InlineData("/tmp/SteamDepotFS-Test")]
+    [InlineData("/VolumesSidecar/SteamDepotFS-Test")]
+    public void IsFSKitMountPoint_RejectsNonVolumesPaths(string mountPoint)
+    {
+        var result = TryInvokeIsFSKitMountPoint(mountPoint);
+        if (result is null)
+        {
+            return;
+        }
+
+        Assert.False(result.Value);
+    }
+
+    private static bool? TryInvokeIsFSKitMountPoint(string mountPoint)
+    {
+        var type = typeof(DepotMountFactory).Assembly.GetType("MacFuseRuntime");
+        if (type is null)
+        {
+            return null;
+        }
+
+        var method = type.GetMethod("IsFSKitMountPoint", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        return (bool)method.Invoke(null, [mountPoint])!;
     }
 }

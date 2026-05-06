@@ -85,6 +85,27 @@ jobs:
         shell: pwsh
         run: scripts/ci/test-steam-depotfs-windows.ps1
 
+  macos-public-depot:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install macFUSE
+        run: scripts/ci/install-macfuse-macos.sh
+
+      - name: Test macOS public depot mount
+        run: scripts/ci/test-steam-depotfs-macos.sh
+        env:
+          MOUNT_DIR: /Volumes/SteamDepotFS-Test
+
   authenticated-depot:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04

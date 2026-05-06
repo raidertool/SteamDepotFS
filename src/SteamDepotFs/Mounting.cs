@@ -1,3 +1,7 @@
+#if FUSE_MOUNT
+using Mono.Fuse.NETStandard;
+#endif
+
 internal interface IDepotMountHost : IDisposable
 {
     string MountPoint { get; }
@@ -7,6 +11,7 @@ internal interface IDepotMountHost : IDisposable
 internal enum DepotMountBackend
 {
     LinuxFuse,
+    MacFuse,
     WinFsp
 }
 
@@ -55,10 +60,7 @@ internal static class DepotMountFactory
 
         if (OperatingSystem.IsMacOS())
         {
-            return MountPreflight.Failure(
-                mountPoint,
-                "macOS mount support is not implemented in this build.",
-                "Use smoke, list, or read on macOS, or mount on Windows with WinFsp or Linux with FUSE.");
+            return CheckMacFuse(mountPoint);
         }
 
         return MountPreflight.Failure(
@@ -72,6 +74,7 @@ internal static class DepotMountFactory
         return preflight.Backend switch
         {
             DepotMountBackend.LinuxFuse => CreateLinuxFuse(preflight.MountPoint, reader),
+            DepotMountBackend.MacFuse => CreateMacFuse(preflight.MountPoint, reader),
             DepotMountBackend.WinFsp => WinFspMountSupport.Create(preflight.MountPoint, reader),
             _ => throw new PlatformNotSupportedException("No mount backend is available.")
         };
@@ -96,12 +99,9 @@ internal static class DepotMountFactory
     {
 #if FUSE_MOUNT
         var fullMountPoint = Path.GetFullPath(mountPoint);
-        if (!Directory.Exists(fullMountPoint))
+        if (!TryValidateDirectoryMountPoint("Linux FUSE", fullMountPoint, out var error))
         {
-            return MountPreflight.Failure(
-                fullMountPoint,
-                $"Linux FUSE mount point does not exist: {fullMountPoint}",
-                "Create it first, for example: mkdir -p <mount-point>");
+            return MountPreflight.Failure(fullMountPoint, error);
         }
 
         if (!File.Exists("/dev/fuse"))
@@ -128,6 +128,51 @@ internal static class DepotMountFactory
 #else
         throw new PlatformNotSupportedException("This build does not include Linux FUSE mount support.");
 #endif
+    }
+
+    private static MountPreflight CheckMacFuse(string mountPoint)
+    {
+#if MACFUSE_MOUNT
+        var fullMountPoint = Path.GetFullPath(mountPoint);
+        if (!TryValidateDirectoryMountPoint("macOS FUSE", fullMountPoint, out var error))
+        {
+            return MountPreflight.Failure(fullMountPoint, error);
+        }
+
+        return MacFuseMountSupport.Check(fullMountPoint);
+#else
+        return MountPreflight.Failure(
+            mountPoint,
+            "This build does not include macOS FUSE mount support.",
+            "Use a macOS release archive or rebuild with -p:EnableMacFuse=true.");
+#endif
+    }
+
+    private static IDepotMountHost CreateMacFuse(string mountPoint, DepotReader reader)
+    {
+#if MACFUSE_MOUNT
+        return MacFuseMountSupport.Create(mountPoint, reader);
+#else
+        throw new PlatformNotSupportedException("This build does not include macOS FUSE mount support.");
+#endif
+    }
+
+    private static bool TryValidateDirectoryMountPoint(string backendName, string mountPoint, out string error)
+    {
+        if (File.Exists(mountPoint))
+        {
+            error = $"{backendName} mount point is a file, not a directory: {mountPoint}";
+            return false;
+        }
+
+        if (!Directory.Exists(mountPoint))
+        {
+            error = $"{backendName} mount point does not exist: {mountPoint}";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
 #if FUSE_MOUNT

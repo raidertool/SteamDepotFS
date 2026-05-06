@@ -1466,6 +1466,11 @@ internal sealed class DepotFuseFileSystem : FileSystem
         MaxReadSize = 1024 * 1024;
         AttributeTimeout = 60;
         PathTimeout = 60;
+
+        if (Environment.GetEnvironmentVariable("STEAM_DEPOTFS_FUSE_DEBUG") == "1")
+        {
+            EnableFuseDebugOutput = true;
+        }
     }
 
     protected override Errno OnGetPathStatus(string path, out Stat stat)
