@@ -134,12 +134,27 @@ internal static class DepotMountFactory
     {
 #if MACFUSE_MOUNT
         var fullMountPoint = Path.GetFullPath(mountPoint);
-        if (!TryValidateDirectoryMountPoint("macOS FUSE", fullMountPoint, out var error))
+        if (File.Exists(fullMountPoint))
         {
-            return MountPreflight.Failure(fullMountPoint, error);
+            return MountPreflight.Failure(
+                fullMountPoint,
+                $"macOS FUSE mount point is a file, not a directory: {fullMountPoint}");
         }
 
-        return MacFuseMountSupport.Check(fullMountPoint);
+        var macFuse = MacFuseMountSupport.Check(fullMountPoint);
+        if (!macFuse.Succeeded)
+        {
+            return macFuse;
+        }
+
+        if (!Directory.Exists(fullMountPoint) && !MacFuseRuntime.ShouldUseFSKitBackend(fullMountPoint))
+        {
+            return MountPreflight.Failure(
+                fullMountPoint,
+                $"macOS FUSE mount point does not exist: {fullMountPoint}");
+        }
+
+        return macFuse;
 #else
         return MountPreflight.Failure(
             mountPoint,

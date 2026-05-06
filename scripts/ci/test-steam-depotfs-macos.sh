@@ -66,8 +66,10 @@ MOUNT_STDERR="$WORK_ROOT/steam-depotfs-macos-mount.err.log"
 rm -f "$MOUNT_STDOUT" "$MOUNT_STDERR"
 
 if [[ "$MOUNT_DIR" == /Volumes/* ]]; then
-  sudo mkdir -p "$MOUNT_DIR"
-  sudo chown "$(id -u):$(id -g)" "$MOUNT_DIR"
+  diskutil unmount force "$MOUNT_DIR" >/dev/null 2>&1 || true
+  if [[ -d "$MOUNT_DIR" ]]; then
+    sudo rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+  fi
 else
   mkdir -p "$MOUNT_DIR"
 fi
