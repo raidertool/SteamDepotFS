@@ -37,6 +37,54 @@ jobs:
           CACHE_MIN_FREE_BYTES: 2G
           REQUIRE_FUSE: 1
 
+  windows-public-depot:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install WinFsp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "winfsp-2.1.25156.msi"
+          $log = Join-Path $env:RUNNER_TEMP "winfsp-install.log"
+          Invoke-WebRequest `
+            -Uri "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
+            -OutFile $installer
+
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne "073A70E00F77423E34BED98B86E600DEF93393BA5822204FAC57A29324DB9F7A") {
+            throw "Unexpected WinFsp installer SHA256: $hash"
+          }
+
+          $process = Start-Process `
+            -FilePath msiexec.exe `
+            -ArgumentList "/i `"$installer`" /qn /norestart /l*v `"$log`"" `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -notin 0, 3010) {
+            Get-Content $log -ErrorAction SilentlyContinue
+            throw "WinFsp installer failed with exit code $($process.ExitCode)."
+          }
+
+          $fsptool = "${env:ProgramFiles(x86)}\WinFsp\bin\fsptool.exe"
+          if (Test-Path $fsptool) {
+            & $fsptool ver
+          }
+
+      - name: Test Windows public depot mount
+        shell: pwsh
+        run: scripts/ci/test-steam-depotfs-windows.ps1
+
   authenticated-depot:
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04

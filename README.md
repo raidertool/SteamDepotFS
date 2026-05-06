@@ -6,13 +6,28 @@ It was created for GitHub workflows that operate on Steam game files but have li
 
 ## Installation
 
-For CI or other projects, download the latest Linux x64 release archive. The release build is self-contained and does not require the .NET SDK:
+For CI or other projects, download the release archive for the target platform. Release builds are self-contained and do not require the .NET SDK:
 
 ```bash
 curl -L -o SteamDepotFS-linux-x64.tar.gz \
   https://github.com/raidertool/SteamDepotFS/releases/latest/download/SteamDepotFS-linux-x64.tar.gz
 tar -xzf SteamDepotFS-linux-x64.tar.gz
 ```
+
+Release assets use these stable names:
+
+| Platform | Asset |
+| --- | --- |
+| Windows x64 | `SteamDepotFS-win-x64.zip` |
+| Windows arm64 | `SteamDepotFS-win-arm64.zip` |
+| Linux x64 | `SteamDepotFS-linux-x64.tar.gz` |
+| Linux arm64 | `SteamDepotFS-linux-arm64.tar.gz` |
+| macOS Apple Silicon | `SteamDepotFS-osx-arm64.tar.gz` |
+| macOS Intel | `SteamDepotFS-osx-x64.tar.gz` |
+
+For mounted filesystem access on Windows, install WinFsp 2.1 or later:
+
+https://winfsp.dev/rel/
 
 For mounted filesystem access on Linux, install FUSE:
 
@@ -22,7 +37,9 @@ sudo apt-get install -y fuse3 libfuse2
 sudo modprobe fuse || true
 ```
 
-The `smoke`, `list`, and `read` commands do not require FUSE. Only `mount` requires FUSE.
+The `smoke`, `list`, `inspect`, and `read` commands do not require WinFsp or FUSE. Only `mount` requires an OS filesystem driver.
+
+macOS release binaries currently support `smoke`, `list`, `inspect`, and `read`. macOS `mount` is not implemented yet; use Windows with WinFsp or Linux with FUSE for mounted filesystem access.
 
 To build from source instead, install the .NET 8 SDK and run:
 
@@ -67,11 +84,22 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
   --mount-point /tmp/steam-depotfs
 ```
 
-Unmount:
+On Windows, use an unused drive letter or an empty directory mount point:
+
+```powershell
+SteamDepotFs.exe mount `
+  --app <app-id> `
+  --depot <depot-id> `
+  --mount-point X:
+```
+
+Unmount on Linux:
 
 ```bash
 fusermount3 -u /tmp/steam-depotfs
 ```
+
+Unmount on Windows by stopping the SteamDepotFS process, for example with `Ctrl+C` in the terminal running `mount`.
 
 Anonymous login is used unless credentials are provided. Credentials can be passed as arguments or environment variables:
 
@@ -120,7 +148,7 @@ The default public smoke target is Spacewar:
 - depot `481`
 - branch `public`
 
-That depot is small and works anonymously, so it is useful for validating Steam login, manifest resolution, CDN downloads, cache reuse, and FUSE mounting before testing private depots.
+That depot is small and works anonymously, so it is useful for validating Steam login, manifest resolution, CDN downloads, cache reuse, and mounting before testing private depots.
 
 Run the public test script:
 
@@ -155,7 +183,7 @@ Releases are created directly from `main` after the `Depot tests` workflow succe
 - `fix:`, `perf:`, `refactor:`, and `revert:` create a patch release
 - docs-only or CI-only changes do not create a release
 
-Each release publishes a Linux x64 archive with both a versioned asset name and the stable `SteamDepotFS-linux-x64.tar.gz` asset name for `releases/latest` downloads. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside the archive.
+Each release publishes Windows, Linux, and macOS archives with both versioned asset names and stable `SteamDepotFS-<rid>` asset names for `releases/latest` downloads. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside each archive.
 
 ## License
 

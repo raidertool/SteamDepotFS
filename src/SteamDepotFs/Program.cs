@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
+#if FUSE_MOUNT
 using Mono.Fuse.NETStandard;
 using Mono.Unix.Native;
+#endif
 using SteamKit2;
 using SteamKit2.CDN;
 
@@ -210,13 +212,11 @@ internal static class Program
             throw new ArgumentException("mount requires --mount-point <directory> or a positional mount point.");
         }
 
-        if (!OperatingSystem.IsLinux())
-        {
-            throw new PlatformNotSupportedException("The FUSE mount command must run on Linux or WSL. Use smoke/list/read here to test the Steam path.");
-        }
+        var mountPreflight = DepotMountFactory.Check(mountPoint);
+        mountPreflight.ThrowIfFailed();
 
         await using var depot = await DepotReader.OpenAsync(options, cancellationToken);
-        using var fs = new DepotFuseFileSystem(Path.GetFullPath(mountPoint), depot);
+        using var fs = DepotMountFactory.Create(mountPreflight, depot);
 
         Console.Error.WriteLine($"mounting app={options.AppId} depot={options.DepotId} manifest={depot.Manifest.ManifestGID} at {fs.MountPoint}");
         fs.Start();
@@ -240,7 +240,7 @@ internal static class Program
           list [--limit N]              List paths from the manifest.
           inspect --path PATH           Print manifest metadata and chunk layout for a depot path.
           read --path PATH [--out FILE] Read a depot path, optionally with --offset and --length.
-          mount --mount-point DIR       Mount the depot read-only through Linux FUSE.
+          mount --mount-point PATH      Mount the depot read-only through the OS filesystem driver.
 
         Common options:
           --app ID                      Steam app id. Default: 480.
@@ -1424,6 +1424,7 @@ internal sealed class DirectoryNode
     }
 }
 
+#if FUSE_MOUNT
 internal sealed class DepotFuseFileSystem : FileSystem
 {
     private static readonly FilePermissions DirectoryMode =
@@ -1660,6 +1661,7 @@ internal sealed class DepotFuseFileSystem : FileSystem
         return BitConverter.ToUInt64(hash, 0) & 0x7fffffffffffffff;
     }
 }
+#endif
 
 internal sealed class ParsedArgs
 {
