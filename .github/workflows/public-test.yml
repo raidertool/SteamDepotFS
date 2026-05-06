@@ -102,6 +102,7 @@ jobs:
         run: scripts/ci/install-macfuse-macos.sh
 
       - name: Test macOS public depot mount
+        timeout-minutes: 10
         run: scripts/ci/test-steam-depotfs-macos.sh
         env:
           MOUNT_DIR: /Volumes/SteamDepotFS-Test

@@ -79,6 +79,16 @@ MOUNT_PID=$!
 
 cleanup() {
   diskutil unmount force "$MOUNT_DIR" >/dev/null 2>&1 || umount "$MOUNT_DIR" >/dev/null 2>&1 || true
+
+  if kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
+    kill "$MOUNT_PID" >/dev/null 2>&1 || true
+    sleep 1
+  fi
+
+  if kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
+    kill -9 "$MOUNT_PID" >/dev/null 2>&1 || true
+  fi
+
   wait "$MOUNT_PID" >/dev/null 2>&1 || true
   if [[ "$MOUNT_DIR" == /Volumes/SteamDepotFS-* ]]; then
     sudo rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
