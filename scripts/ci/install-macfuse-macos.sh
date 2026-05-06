@@ -56,7 +56,7 @@ sudo installer -pkg "$PKG_FILE" -target /
 
 MACFUSE_CLI="/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/MacOS/macfuse"
 if [[ -x "$MACFUSE_CLI" ]]; then
-  sudo "$MACFUSE_CLI" install --components file-system-extensions --force
+  sudo "$MACFUSE_CLI" install --force
 fi
 
 if [[ ! -e /usr/local/lib/libfuse.dylib && ! -e /opt/homebrew/lib/libfuse.dylib ]]; then

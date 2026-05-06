@@ -117,5 +117,11 @@ echo "--- mount stdout ---" >&2
 sed -n '1,160p' "$MOUNT_STDOUT" >&2 || true
 echo "--- mount stderr ---" >&2
 sed -n '1,160p' "$MOUNT_STDERR" >&2 || true
+echo "--- mount table ---" >&2
+mount >&2 || true
+echo "--- mount point listing ---" >&2
+ls -la "$MOUNT_DIR" >&2 || true
+echo "--- diskutil info ---" >&2
+diskutil info "$MOUNT_DIR" >&2 || true
 
 exit 1

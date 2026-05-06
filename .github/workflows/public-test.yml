@@ -106,6 +106,7 @@ jobs:
         run: scripts/ci/test-steam-depotfs-macos.sh
         env:
           MOUNT_DIR: /Volumes/SteamDepotFS-Test
+          STEAM_DEPOTFS_FUSE_DEBUG: 1
 
   authenticated-depot:
     if: ${{ github.event_name != 'pull_request' }}

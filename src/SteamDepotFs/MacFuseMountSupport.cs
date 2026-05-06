@@ -279,12 +279,14 @@ internal static unsafe class MacFuseMountSupport
 
         private readonly DepotReader _reader;
         private readonly long _now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        private readonly bool _allowWriteModeOpens;
         private bool _disposed;
 
         public MacFuseFileSystem(string mountPoint, DepotReader reader)
         {
             MountPoint = mountPoint;
             _reader = reader;
+            _allowWriteModeOpens = MacFuseRuntime.ShouldUseFSKitBackend(mountPoint);
         }
 
         public string MountPoint { get; }
@@ -306,6 +308,7 @@ internal static unsafe class MacFuseMountSupport
                     Current = this;
                 }
 
+                LogDebug("macFUSE arguments: " + string.Join(' ', args));
                 var result = FuseMainReal(
                     args.Count,
                     argv,
@@ -454,7 +457,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.GetAttr(PathFromNative(path), stat);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE getattr {managedPath}");
+                return current.GetAttr(managedPath, stat);
             }
             catch (Exception ex)
             {
@@ -479,7 +484,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.ReadLink(PathFromNative(path), buffer, (int)size);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE readlink {managedPath}");
+                return current.ReadLink(managedPath, buffer, (int)size);
             }
             catch (Exception ex)
             {
@@ -499,7 +506,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.Open(PathFromNative(path), fileInfo);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE open {managedPath}");
+                return current.Open(managedPath, fileInfo);
             }
             catch (Exception ex)
             {
@@ -524,7 +533,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.Read(PathFromNative(path), buffer, (int)size, offset);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE read {managedPath} size={size} offset={offset}");
+                return current.Read(managedPath, buffer, (int)size, offset);
             }
             catch (Exception ex)
             {
@@ -544,6 +555,7 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
+                LogDebug("macFUSE statfs");
                 return current.StatFs(stat);
             }
             catch (Exception ex)
@@ -564,7 +576,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.OpenDir(PathFromNative(path));
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE opendir {managedPath}");
+                return current.OpenDir(managedPath);
             }
             catch (Exception ex)
             {
@@ -584,7 +598,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.ReadDir(PathFromNative(path), buffer, filler);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE readdir {managedPath}");
+                return current.ReadDir(managedPath, buffer, filler);
             }
             catch (Exception ex)
             {
@@ -608,7 +624,9 @@ internal static unsafe class MacFuseMountSupport
                     return -ErrnoIo;
                 }
 
-                return current.Access(PathFromNative(path), mode);
+                var managedPath = PathFromNative(path);
+                LogDebug($"macFUSE access {managedPath} mode={mode}");
+                return current.Access(managedPath, mode);
             }
             catch (Exception ex)
             {
@@ -725,7 +743,7 @@ internal static unsafe class MacFuseMountSupport
                 return _reader.Index.TryGetDirectory(path, out _) ? -ErrnoIsDirectory : -ErrnoNoEntry;
             }
 
-            if (fileInfo != IntPtr.Zero)
+            if (!_allowWriteModeOpens && fileInfo != IntPtr.Zero)
             {
                 var flags = Marshal.ReadInt32(fileInfo);
                 if ((flags & OpenAccessMode) != OpenReadOnly)
@@ -913,6 +931,14 @@ internal static unsafe class MacFuseMountSupport
 
         private static string PathFromNative(byte* path)
             => Marshal.PtrToStringUTF8((IntPtr)path) ?? "/";
+
+        private static void LogDebug(string message)
+        {
+            if (Environment.GetEnvironmentVariable("STEAM_DEPOTFS_FUSE_DEBUG") == "1")
+            {
+                Console.Error.WriteLine(message);
+            }
+        }
 
         private static ulong StableInode(string path)
         {
