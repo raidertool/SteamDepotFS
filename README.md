@@ -175,7 +175,7 @@ scripts/bench/read-matrix.sh <app-id> <depot-id> <depot-path>
 
 The script defaults to `--read-ahead-chunks` values `0 1 2`, `--max-chunk-concurrency` values `4 8 16`, and cold cache runs. Set `WARM_CACHE=1`, `ITERATIONS`, `OFFSET`, `LENGTH`, `READ_AHEAD_VALUES`, or `CONCURRENCY_VALUES` to tune the run.
 
-The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE, and verifies the file is visible through the mounted filesystem. Manual runs also test WinFsp on Windows and macFUSE on macOS hosted runners.
+The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE on Linux, and verifies the file is visible through the mounted filesystem. Manual runs also test WinFsp on Windows. GitHub-hosted macOS runners publish the native macOS binary, install macFUSE, and run the Steam smoke/read check; macFUSE mount validation is available through the `run_macos_self_hosted_mount` manual workflow input on a self-hosted macOS runner with macFUSE configured.
 
 The workflow also includes an authenticated smoke test for pushes and manual runs. It logs in with configured Steam credentials, resolves the configured depot, and reads a small file from that depot. Configure either:
 

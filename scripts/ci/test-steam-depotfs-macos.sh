@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "macOS mount test only runs on macOS." >&2
+  echo "macOS test only runs on macOS." >&2
   exit 1
 fi
 
@@ -13,6 +13,7 @@ CACHE_DIR="${CACHE_DIR:-$WORK_ROOT/steam-depotfs-macos-cache}"
 PUBLISH_DIR="${PUBLISH_DIR:-$WORK_ROOT/steam-depotfs-macos-publish}"
 MOUNT_DIR="${MOUNT_DIR:-$WORK_ROOT/steam-depotfs-mount}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-90}"
+RUN_MOUNT="${RUN_MOUNT:-1}"
 
 case "$(uname -m)" in
   arm64) RUNTIME_IDENTIFIER="${RUNTIME_IDENTIFIER:-osx-arm64}" ;;
@@ -60,6 +61,11 @@ COMMON_ARGS=(
 )
 
 "$EXE" smoke "${COMMON_ARGS[@]}"
+
+if [[ "$RUN_MOUNT" != "1" ]]; then
+  echo "Skipping macFUSE mount test."
+  exit 0
+fi
 
 MOUNT_STDOUT="$WORK_ROOT/steam-depotfs-macos-mount.out.log"
 MOUNT_STDERR="$WORK_ROOT/steam-depotfs-macos-mount.err.log"

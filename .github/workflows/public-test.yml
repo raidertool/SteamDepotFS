@@ -6,6 +6,12 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_macos_self_hosted_mount:
+        description: Run the macFUSE mount test on a self-hosted macOS runner.
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   public-depot:
@@ -101,12 +107,31 @@ jobs:
       - name: Install macFUSE
         run: scripts/ci/install-macfuse-macos.sh
 
-      - name: Test macOS public depot mount
+      - name: Test macOS public depot smoke
         timeout-minutes: 10
         run: scripts/ci/test-steam-depotfs-macos.sh
         env:
           MOUNT_DIR: /Volumes/SteamDepotFS-Test
-          STEAM_DEPOTFS_FUSE_DEBUG: 1
+          RUN_MOUNT: 0
+
+  macos-self-hosted-public-depot:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_macos_self_hosted_mount }}
+    runs-on: [self-hosted, macOS]
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test self-hosted macOS public depot mount
+        timeout-minutes: 10
+        run: scripts/ci/test-steam-depotfs-macos.sh
+        env:
+          MOUNT_DIR: /Volumes/SteamDepotFS-Test
 
   authenticated-depot:
     if: ${{ github.event_name != 'pull_request' }}
