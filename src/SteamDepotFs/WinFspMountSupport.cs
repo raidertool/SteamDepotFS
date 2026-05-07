@@ -1,7 +1,6 @@
 #if WINDOWS_MOUNT
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
-using System.Security.Cryptography;
 using Fsp;
 using SteamKit2;
 using FileInfo = Fsp.Interop.FileInfo;
@@ -167,7 +166,7 @@ internal static class WinFspMountSupport
             const ulong blockSize = AllocationUnit;
             volumeInfo = new VolumeInfo
             {
-                TotalSize = RoundUp(_reader.Manifest.TotalUncompressedSize, blockSize),
+                TotalSize = DepotFileSystemMetadata.RoundUp(_reader.Manifest.TotalUncompressedSize, blockSize),
                 FreeSize = 0
             };
             volumeInfo.SetVolumeLabel("SteamDepotFS");
@@ -248,7 +247,7 @@ internal static class WinFspMountSupport
             int read;
             if (file.Flags.HasFlag(EDepotFileFlag.Symlink) && file.LinkTarget is not null)
             {
-                read = ReadLinkTarget(file.LinkTarget, (long)offset, managedBuffer);
+                read = DepotFileSystemMetadata.ReadLinkTarget(file.LinkTarget, checked((long)offset), managedBuffer);
             }
             else
             {
@@ -340,7 +339,7 @@ internal static class WinFspMountSupport
                 return STATUS_NOT_A_DIRECTORY;
             }
 
-            var childPath = CombinePath(directory.Path, fileName);
+            var childPath = DepotFileSystemMetadata.CombinePath(directory.Path, fileName);
             if (!TryGetNode(childPath, out var child))
             {
                 return STATUS_OBJECT_NAME_NOT_FOUND;
@@ -468,23 +467,10 @@ internal static class WinFspMountSupport
 
         private IEnumerable<DirectoryEntryInfo> DirectoryEntries(DirectoryNode directory, string marker)
         {
-            var entries = new List<DirectoryEntryInfo>
-            {
-                new(".", FileInfoFor(new WinFspNode(".", directory.Path, directory, null))),
-                new("..", FileInfoFor(new WinFspNode("..", directory.Path, directory, null)))
-            };
-
-            entries.AddRange(directory.Directories.Values
-                .OrderBy(static child => child.Name, StringComparer.Ordinal)
-                .Select(child => new DirectoryEntryInfo(
-                    child.Name,
-                    FileInfoFor(new WinFspNode(child.Name, child.Path, child, null)))));
-
-            entries.AddRange(directory.Files
-                .OrderBy(static child => child.Key, StringComparer.Ordinal)
-                .Select(child => new DirectoryEntryInfo(
-                    child.Key,
-                    FileInfoFor(new WinFspNode(child.Key, child.Value.FileName, null, child.Value)))));
+            var entries = DepotFileSystemMetadata.EnumerateDirectory(directory)
+                .Select(entry => new DirectoryEntryInfo(
+                    entry.Name,
+                    FileInfoFor(new WinFspNode(entry.Name, entry.Path, entry.Directory, entry.File))));
 
             return string.IsNullOrEmpty(marker)
                 ? entries
@@ -504,23 +490,23 @@ internal static class WinFspMountSupport
                     LastAccessTime = _mountedAt,
                     LastWriteTime = _createdAt,
                     ChangeTime = _mountedAt,
-                    IndexNumber = StableIndexNumber(node.Path),
+                    IndexNumber = DepotFileSystemMetadata.StableId(node.Path),
                     HardLinks = 1
                 };
             }
 
             var file = node.File!;
-            var size = FileSize(file);
+            var size = DepotFileSystemMetadata.FileSize(file);
             return new FileInfo
             {
                 FileAttributes = FileAttributesFor(node),
-                AllocationSize = RoundUp((ulong)size, AllocationUnit),
+                AllocationSize = DepotFileSystemMetadata.RoundUp((ulong)size, AllocationUnit),
                 FileSize = (ulong)size,
                 CreationTime = _createdAt,
                 LastAccessTime = _mountedAt,
                 LastWriteTime = _createdAt,
                 ChangeTime = _mountedAt,
-                IndexNumber = StableIndexNumber(file.FileName),
+                IndexNumber = DepotFileSystemMetadata.StableId(file.FileName),
                 HardLinks = 1
             };
         }
@@ -534,42 +520,8 @@ internal static class WinFspMountSupport
             return (uint)attributes;
         }
 
-        private static long FileSize(DepotManifest.FileData file)
-            => file.Flags.HasFlag(EDepotFileFlag.Symlink) && file.LinkTarget is not null
-                ? System.Text.Encoding.UTF8.GetByteCount(file.LinkTarget)
-                : (long)file.TotalSize;
-
-        private static int ReadLinkTarget(string linkTarget, long offset, byte[] destination)
-        {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(linkTarget);
-            if (offset < 0 || offset >= bytes.Length || destination.Length == 0)
-            {
-                return 0;
-            }
-
-            var length = Math.Min(destination.Length, bytes.Length - (int)offset);
-            Buffer.BlockCopy(bytes, (int)offset, destination, 0, length);
-            return length;
-        }
-
-        private static string CombinePath(string parent, string child)
-            => parent.Length == 0 ? child : parent + "/" + child;
-
-        private static ulong RoundUp(ulong value, ulong unit)
-            => value == 0 ? 0 : ((value + unit - 1) / unit) * unit;
-
-        private static ulong StableIndexNumber(string path)
-        {
-            var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(path));
-            return BitConverter.ToUInt64(hash, 0) & 0x7fffffffffffffff;
-        }
-
         private static ulong ToFileTime(DateTime value)
-        {
-            var utc = value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
-            var minimum = DateTime.FromFileTimeUtc(0);
-            return utc <= minimum ? 0 : (ulong)utc.ToFileTimeUtc();
-        }
+            => DepotFileSystemMetadata.ToFileTime(value);
 
         private static byte[] CreateSecurityDescriptor()
         {
