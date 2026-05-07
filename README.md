@@ -9,21 +9,22 @@ It was created for GitHub workflows that operate on Steam game files but have li
 For CI or other projects, download the release archive for the target platform. Release builds are self-contained and do not require the .NET SDK:
 
 ```bash
-curl -L -o SteamDepotFS-linux-x64.tar.gz \
-  https://github.com/raidertool/SteamDepotFS/releases/latest/download/SteamDepotFS-linux-x64.tar.gz
-tar -xzf SteamDepotFS-linux-x64.tar.gz
+version=0.2.0
+curl -L -o "SteamDepotFS-$version-linux-x64.tar.gz" \
+  "https://github.com/raidertool/SteamDepotFS/releases/download/v$version/SteamDepotFS-$version-linux-x64.tar.gz"
+tar -xzf "SteamDepotFS-$version-linux-x64.tar.gz"
 ```
 
-Release assets use these stable names:
+Release assets use versioned names:
 
 | Platform | Asset |
 | --- | --- |
-| Windows x64 | `SteamDepotFS-win-x64.zip` |
-| Windows arm64 | `SteamDepotFS-win-arm64.zip` |
-| Linux x64 | `SteamDepotFS-linux-x64.tar.gz` |
-| Linux arm64 | `SteamDepotFS-linux-arm64.tar.gz` |
-| macOS Apple Silicon | `SteamDepotFS-osx-arm64.tar.gz` |
-| macOS Intel | `SteamDepotFS-osx-x64.tar.gz` |
+| Windows x64 | `SteamDepotFS-<version>-win-x64.zip` |
+| Windows arm64 | `SteamDepotFS-<version>-win-arm64.zip` |
+| Linux x64 | `SteamDepotFS-<version>-linux-x64.tar.gz` |
+| Linux arm64 | `SteamDepotFS-<version>-linux-arm64.tar.gz` |
+| macOS Apple Silicon | `SteamDepotFS-<version>-osx-arm64.tar.gz` |
+| macOS Intel | `SteamDepotFS-<version>-osx-x64.tar.gz` |
 
 For mounted filesystem access on Windows, install WinFsp 2.1 or later:
 
@@ -193,7 +194,7 @@ Releases are created directly from `main` after the `Depot tests` workflow succe
 - `fix:`, `perf:`, `refactor:`, and `revert:` create a patch release
 - docs-only or CI-only changes do not create a release
 
-Each release publishes Windows, Linux, and macOS archives with both versioned asset names and stable `SteamDepotFS-<rid>` asset names for `releases/latest` downloads. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside each archive.
+Each release publishes Windows, Linux, and macOS archives with versioned asset names only, for example `SteamDepotFS-0.2.0-linux-x64.tar.gz`. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside each archive.
 
 ## License
 
