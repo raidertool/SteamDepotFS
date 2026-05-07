@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.0
+
+Changes since v0.1.1:
+
+- ci: track changelog in release archives (e3aead8)
+- feat: add Windows WinFsp mount support (5e08303)
+- feat: add native macOS macFUSE mount support (4f7f134)
+- ci: bound macOS mount smoke teardown (33996d1)
+- fix: improve macFUSE FSKit mount validation (168ce81)
+- fix: let macFUSE FSKit create volume mountpoints (2b81de6)
+- ci: split hosted and self-hosted macOS mount checks (db6edc8)
+- refactor: clean up cross-platform mount code (04d5941)
+- Merge pull request #2 from raidertool/codex/cross-platform-mount-support (a8048c9)
+
 ## v0.1.1
 
 Changes since v0.1.0:
