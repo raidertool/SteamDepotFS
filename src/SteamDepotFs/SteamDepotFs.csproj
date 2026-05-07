@@ -14,9 +14,33 @@
     <RepositoryUrl>https://github.com/raidertool/SteamDepotFS</RepositoryUrl>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <EnableWinFsp Condition="'$(EnableWinFsp)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win'))">true</EnableWinFsp>
+    <EnableWinFsp Condition="'$(EnableWinFsp)' == '' and '$(OS)' == 'Windows_NT'">true</EnableWinFsp>
+    <EnableWinFsp Condition="'$(EnableWinFsp)' == ''">false</EnableWinFsp>
+    <EnableFuse Condition="'$(EnableFuse)' == '' and '$(EnableWinFsp)' == 'true'">false</EnableFuse>
+    <EnableFuse Condition="'$(EnableFuse)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx'))">false</EnableFuse>
+    <EnableFuse Condition="'$(EnableFuse)' == '' and '$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">false</EnableFuse>
+    <EnableFuse Condition="'$(EnableFuse)' == ''">true</EnableFuse>
+    <EnableMacFuse Condition="'$(EnableMacFuse)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx'))">true</EnableMacFuse>
+    <EnableMacFuse Condition="'$(EnableMacFuse)' == '' and '$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">true</EnableMacFuse>
+    <EnableMacFuse Condition="'$(EnableMacFuse)' == ''">false</EnableMacFuse>
+    <DefineConstants Condition="'$(EnableWinFsp)' == 'true'">$(DefineConstants);WINDOWS_MOUNT</DefineConstants>
+    <DefineConstants Condition="'$(EnableFuse)' == 'true'">$(DefineConstants);FUSE_MOUNT</DefineConstants>
+    <DefineConstants Condition="'$(EnableMacFuse)' == 'true'">$(DefineConstants);MACFUSE_MOUNT</DefineConstants>
+    <AllowUnsafeBlocks Condition="'$(EnableMacFuse)' == 'true'">true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Mono.Fuse.NETStandard" Version="1.1.0" />
     <PackageReference Include="SteamKit2" Version="3.4.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(EnableFuse)' == 'true'">
+    <PackageReference Include="Mono.Fuse.NETStandard" Version="1.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(EnableWinFsp)' == 'true'">
+    <PackageReference Include="winfsp.net" Version="2.1.25156" />
   </ItemGroup>
 
   <ItemGroup>

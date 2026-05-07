@@ -18,11 +18,16 @@ their own licenses.
 | Package | Version | License | Authors | Project |
 | --- | --- | --- | --- | --- |
 | SteamKit2 | 3.4.0 | LGPL-2.1-only | SteamKit2 | https://github.com/SteamRE/SteamKit |
+| winfsp.net | 2.1.25156 | GPL-3.0 with WinFsp Free/Libre and Open Source Software exception | Bill Zissimopoulos | https://github.com/winfsp/winfsp |
 | Mono.Fuse.NETStandard | 1.1.0 | MIT | Jonathan Pryor, Alexey Kolpakov | https://github.com/alhimik45/Mono.Fuse.NETStandard |
 | Mono.Posix.NETStandard | 1.0.0 | Package license URL: https://go.microsoft.com/fwlink/?linkid=869050 | Microsoft | https://go.microsoft.com/fwlink/?linkid=869051 |
+| Microsoft.Win32.Registry | 5.0.0 | MIT | Microsoft | https://github.com/dotnet/runtime |
 | protobuf-net | 3.2.56 | Apache-2.0 | Marc Gravell | https://github.com/protobuf-net/protobuf-net |
 | protobuf-net.Core | 3.2.56 | Apache-2.0 | Marc Gravell | https://github.com/protobuf-net/protobuf-net |
+| System.IO.FileSystem.AccessControl | 5.0.0 | MIT | Microsoft | https://github.com/dotnet/runtime |
 | System.IO.Hashing | 10.0.1 | MIT | Microsoft | https://dot.net/ |
+| System.Security.AccessControl | 5.0.0 | MIT | Microsoft | https://github.com/dotnet/runtime |
+| System.Security.Principal.Windows | 5.0.0 | MIT | Microsoft | https://github.com/dotnet/runtime |
 | ZstdSharp.Port | 0.8.7 | MIT | Oleg Stepanischev | https://github.com/oleg-st/ZstdSharp |
 
 ## LGPL Notice For SteamKit2
@@ -40,3 +45,14 @@ SteamDepotFS does not modify SteamKit2. If you receive a binary distribution
 that includes SteamKit2, you may replace or relink the SteamKit2 library with
 a modified compatible version under the terms of the LGPL-2.1-only license.
 SteamDepotFS source and build instructions are available in this repository.
+
+## WinFsp Notice
+
+Windows binary distributions may include the WinFsp .NET binding. The WinFsp
+source repository is available at:
+
+https://github.com/winfsp/winfsp
+
+WinFsp is distributed under GPL-3.0 with a special exception for Free/Libre
+and Open Source Software. SteamDepotFS does not bundle the WinFsp kernel
+driver; users install the WinFsp runtime separately.
