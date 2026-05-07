@@ -80,18 +80,10 @@ jobs:
 
             if [[ "$rid" == win-* ]]; then
               (cd dist && zip -qr "$archive_root.zip" "$archive_root")
-              cp "dist/$archive_root.zip" "dist/SteamDepotFS-$rid.zip"
-              {
-                echo "dist/$archive_root.zip"
-                echo "dist/SteamDepotFS-$rid.zip"
-              } >> dist/release-assets.txt
+              echo "dist/$archive_root.zip" >> dist/release-assets.txt
             else
               tar -C dist -czf "dist/$archive_root.tar.gz" "$archive_root"
-              cp "dist/$archive_root.tar.gz" "dist/SteamDepotFS-$rid.tar.gz"
-              {
-                echo "dist/$archive_root.tar.gz"
-                echo "dist/SteamDepotFS-$rid.tar.gz"
-              } >> dist/release-assets.txt
+              echo "dist/$archive_root.tar.gz" >> dist/release-assets.txt
             fi
           done
 
