@@ -124,6 +124,16 @@ Anonymous login is used unless credentials are provided. Credentials can be pass
 | `--login-id` | `STEAM_LOGIN_ID` |
 | `--remember-password` | `STEAM_REMEMBER_PASSWORD=1` |
 
+Username/password login obtains a fresh Steam client refresh token in memory, then
+uses that token for depot access. `STEAM_ACCESS_TOKEN` (or `--access-token`)
+accepts an existing client refresh token and takes precedence over any password.
+Tokens are not printed or saved. Each command authenticates independently.
+
+Login is noninteractive. Accounts with Steam Guard must supply an email code or
+mobile authenticator code using the options above; missing or rejected codes
+fail instead of prompting. Prefer environment variables to password/token flags
+so credentials do not appear in command arguments.
+
 Private branches may also require:
 
 ```bash
