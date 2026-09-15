@@ -1,69 +1,37 @@
 # SteamDepotFs
 
-`SteamDepotFs` is a SteamKit-based, read-only Steam depot filesystem. It resolves depot manifests, downloads only the chunks needed for reads, and keeps decompressed chunks in a bounded on-disk cache.
-
-It was created for GitHub workflows that operate on Steam game files but have limited disk space. It can also be used anywhere a read-only, on-demand view of a depot is useful.
+`SteamDepotFs` mounts Steam depots read-only, downloading chunks on demand into a bounded disk cache.
 
 ## Installation
 
-For CI or other projects, download the release archive for the target platform. Release builds are self-contained and do not require the .NET SDK:
+Download and extract a [release](https://github.com/raidertool/SteamDepotFS/releases)
+for your platform. Release binaries are self-contained; no .NET installation is needed.
 
-```bash
-version=0.2.0
-curl -L -o "SteamDepotFS-$version-linux-x64.tar.gz" \
-  "https://github.com/raidertool/SteamDepotFS/releases/download/v$version/SteamDepotFS-$version-linux-x64.tar.gz"
-tar -xzf "SteamDepotFS-$version-linux-x64.tar.gz"
-```
+The v0.2.0 binaries predate the username/password login fix. For that fix, build
+source containing commit `91a8cc1` ([PR #3](https://github.com/raidertool/SteamDepotFS/pull/3)).
 
-Release assets use versioned names:
+Only `mount` needs a filesystem driver; `smoke`, `list`, `inspect`, and `read` do not:
 
-| Platform | Asset |
-| --- | --- |
-| Windows x64 | `SteamDepotFS-<version>-win-x64.zip` |
-| Windows arm64 | `SteamDepotFS-<version>-win-arm64.zip` |
-| Linux x64 | `SteamDepotFS-<version>-linux-x64.tar.gz` |
-| Linux arm64 | `SteamDepotFS-<version>-linux-arm64.tar.gz` |
-| macOS Apple Silicon | `SteamDepotFS-<version>-osx-arm64.tar.gz` |
-| macOS Intel | `SteamDepotFS-<version>-osx-x64.tar.gz` |
+- **Windows:** [WinFsp 2.1+](https://winfsp.dev/rel/).
+- **Linux (Ubuntu/Debian):** `sudo apt-get install -y fuse3 libfuse2`; load FUSE with `sudo modprobe fuse` if needed.
+- **macOS:** [macFUSE](https://macfuse.github.io/). With macOS 15.4+ and macFUSE 5+, mount under `/Volumes/<name>` for FSKit. Other paths use the kernel backend and may require system-extension approval.
 
-For mounted filesystem access on Windows, install WinFsp 2.1 or later:
-
-https://winfsp.dev/rel/
-
-For mounted filesystem access on Linux, install FUSE:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y fuse3 libfuse2
-sudo modprobe fuse || true
-```
-
-For mounted filesystem access on macOS, install macFUSE:
-
-https://macfuse.github.io/
-
-On macOS 15.4 or later with macFUSE 5 or later, mount under `/Volumes/<name>` to use macFUSE's FSKit backend. Other macOS mount points use the kernel backend and may require approving the macFUSE system extension.
-
-The `smoke`, `list`, `inspect`, and `read` commands do not require WinFsp or FUSE. Only `mount` requires an OS filesystem driver.
-
-To build from source instead, install the .NET 8 SDK and run:
+To build and test source, install the .NET 8 SDK, then run from the repository root:
 
 ```bash
 dotnet build src/SteamDepotFs/SteamDepotFs.csproj -c Release
-```
-
-Run the unit tests:
-
-```bash
 dotnet test tests/SteamDepotFs.Tests/SteamDepotFs.Tests.csproj -c Release
 ```
 
 ## Usage
 
+Run these examples from the extracted release directory. From the repository
+root, replace `./SteamDepotFs` with `dotnet run --project src/SteamDepotFs -c Release --`.
+
 List files in a depot:
 
 ```bash
-dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- list \
+./SteamDepotFs list \
   --app <app-id> \
   --depot <depot-id>
 ```
@@ -71,7 +39,7 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- list \
 Read a file from a depot:
 
 ```bash
-dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- read \
+./SteamDepotFs read \
   --app <app-id> \
   --depot <depot-id> \
   --path <depot-path> \
@@ -83,7 +51,7 @@ Mount a depot read-only:
 ```bash
 mkdir -p /tmp/steam-depotfs
 
-dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
+./SteamDepotFs mount \
   --app <app-id> \
   --depot <depot-id> \
   --mount-point /tmp/steam-depotfs
@@ -92,25 +60,16 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
 On Windows, use an unused drive letter or an empty directory mount point:
 
 ```powershell
-SteamDepotFs.exe mount `
+.\SteamDepotFs.exe mount `
   --app <app-id> `
   --depot <depot-id> `
   --mount-point X:
 ```
 
-Unmount on Linux:
+Unmount with `fusermount3 -u /tmp/steam-depotfs` on Linux or
+`diskutil unmount <mount-point>` on macOS. On Windows, stop the mount process with `Ctrl+C`.
 
-```bash
-fusermount3 -u /tmp/steam-depotfs
-```
-
-Unmount on macOS:
-
-```bash
-diskutil unmount /tmp/steam-depotfs
-```
-
-Unmount on Windows by stopping the SteamDepotFS process, for example with `Ctrl+C` in the terminal running `mount`.
+### Authentication
 
 Anonymous login is used unless credentials are provided. Credentials can be passed as arguments or environment variables:
 
@@ -127,23 +86,22 @@ Anonymous login is used unless credentials are provided. Credentials can be pass
 Username/password login obtains a fresh Steam client refresh token in memory, then
 uses that token for depot access. `STEAM_ACCESS_TOKEN` (or `--access-token`)
 accepts an existing client refresh token and takes precedence over any password.
-Tokens are not printed or saved. Each command authenticates independently.
+Tokens are not printed or saved, including with `--remember-password`.
+Each command authenticates independently; supply the username with either method.
 
-Login is noninteractive. Accounts with Steam Guard must supply an email code or
-mobile authenticator code using the options above; missing or rejected codes
-fail instead of prompting. Prefer environment variables to password/token flags
-so credentials do not appear in command arguments.
+Login is noninteractive. If password login requests Steam Guard, supply an email
+or mobile authenticator code. Device-approval prompts are unsupported. Prefer
+environment variables so credentials do not appear in command arguments.
 
-Private branches may also require:
+Use `--branch NAME` to select a branch and `--branch-password-hash HASH` when
+required. `--manifest ID` pins a specific snapshot instead of resolving the branch.
 
-```bash
---manifest <manifest-gid> --branch <branch-name> --branch-password-hash <hash>
-```
+### Cache
 
 Cache limits use explicit byte caps. Suffixes `K`, `M`, `G`, and `T` are accepted:
 
 ```bash
-dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
+./SteamDepotFs mount \
   --app <app-id> \
   --depot <depot-id> \
   --mount-point /tmp/steam-depotfs \
@@ -155,62 +113,54 @@ dotnet run --project src/SteamDepotFs/SteamDepotFs.csproj -c Release -- mount \
   --read-ahead-chunks 1
 ```
 
-`--cache-max-bytes` is the hard cap. `--cache-low-watermark` is the cache size to return to after eviction, not the amount of free disk space to keep. For example, with `--cache-max-bytes 8G` and `--cache-low-watermark 6G`, the cache can grow to 8 GiB; once a new chunk would exceed that cap, old chunks are evicted until the cache is back near 6 GiB.
-
-`--cache-min-free-bytes` is the free-space guard for the filesystem that contains the cache. If a single chunk is larger than the cache cap, it is served without being stored.
-
-`--max-chunk-concurrency` bounds concurrent chunk fetches and cache-miss CDN downloads across foreground reads and read-ahead. `--read-ahead-chunks` controls how many following depot chunks are prefetched after a read; set it to `0` to disable read-ahead.
+The cache grows to `--cache-max-bytes`, then evicts toward `--cache-low-watermark`.
+`--cache-min-free-bytes` guards minimum free disk space. Oversized chunks are served
+without caching. `--max-chunk-concurrency` limits concurrent fetches across reads
+and prefetching; `--read-ahead-chunks 0` disables prefetching.
 
 ## Testing
 
-The default public smoke target is Spacewar:
-
-- app `480`
-- depot `481`
-- branch `public`
-
-That depot is small and works anonymously, so it is useful for validating Steam login, manifest resolution, CDN downloads, cache reuse, and mounting before testing private depots.
-
-Run the public test script:
+The [public test](scripts/ci/test-steam-depotfs-public.sh) uses Spacewar
+(app `480`, depot `481`, branch `public`) anonymously:
 
 ```bash
 CACHE_MAX_BYTES=8G CACHE_LOW_WATERMARK=6G CACHE_MIN_FREE_BYTES=2G REQUIRE_FUSE=1 \
   scripts/ci/test-steam-depotfs-public.sh
 ```
 
-To compare read-ahead and chunk-concurrency settings against a real depot path, run the benchmark matrix script:
+Compare prefetching and concurrency with the [benchmark script](scripts/bench/read-matrix.sh):
 
 ```bash
 scripts/bench/read-matrix.sh <app-id> <depot-id> <depot-path>
 ```
 
-The script defaults to `--read-ahead-chunks` values `0 1 2`, `--max-chunk-concurrency` values `4 8 16`, and cold cache runs. Set `WARM_CACHE=1`, `ITERATIONS`, `OFFSET`, `LENGTH`, `READ_AHEAD_VALUES`, or `CONCURRENCY_VALUES` to tune the run.
-
-The repository includes `.github/workflows/public-test.yml`, which runs the same public test on pushes and pull requests. The workflow builds the project, reads `installscript.vdf` from the Spacewar depot, mounts the depot through FUSE on Linux, and verifies the file is visible through the mounted filesystem. Manual runs also test WinFsp on Windows. GitHub-hosted macOS runners publish the native macOS binary, install macFUSE, and run the Steam smoke/read check; macFUSE mount validation is available through the `run_macos_self_hosted_mount` manual workflow input on a self-hosted macOS runner with macFUSE configured.
-
-The workflow also includes an authenticated smoke test for pushes and manual runs. It logs in with configured Steam credentials, resolves the configured depot, and reads a small file from that depot. Configure either:
-
-- `OP_SERVICE_ACCOUNT_TOKEN` secret plus `OP_STEAM_USERNAME_REF` and `OP_STEAM_PASSWORD_REF` variables for 1Password-backed credentials.
-- `STEAM_USERNAME` and `STEAM_PASSWORD` secrets, or `STEAM_ACCESS_TOKEN` secret, for direct credentials.
-
-Set `STEAM_DEPOTFS_AUTH_APP_ID`, `STEAM_DEPOTFS_AUTH_DEPOT_ID`, and `STEAM_DEPOTFS_AUTH_BRANCH` variables to choose the authenticated test target. `STEAM_DEPOTFS_AUTH_READ_PATH` is optional; when omitted, the smoke command chooses a small readable file from the manifest.
+See those scripts for configuration variables. [Depot tests](.github/workflows/public-test.yml)
+checks public reads and Linux mounts on pushes and PRs. Manual runs add Windows
+mounts and optional self-hosted macOS mounts; hosted macOS checks reads only.
+Authenticated tests run on pushes/manual runs when configured. Supply
+`STEAM_USERNAME` with `STEAM_PASSWORD` or `STEAM_ACCESS_TOKEN`, or use the workflow's
+1Password references. Target-depot variables are documented in the workflow.
 
 ## Releases
 
-Releases are created directly from `main` after the `Depot tests` workflow succeeds. The release workflow scans conventional commits since the latest `v*` tag:
+Automatic releases follow successful `Depot tests` runs on `main`. Manual release
+dispatch also uses `main`, without rerunning those tests. The release workflow
+uses [conventional commits](scripts/ci/compute-release-version.sh) since the
+previous reachable `v*` tag:
 
 - breaking changes create a major release
 - `feat:` creates a minor release
 - `fix:`, `perf:`, `refactor:`, and `revert:` create a patch release
 - docs-only or CI-only changes do not create a release
 
-Each release publishes Windows, Linux, and macOS archives with versioned asset names only, for example `SteamDepotFS-0.2.0-linux-x64.tar.gz`. CI also generates release notes for the GitHub release body, updates the tracked `CHANGELOG.md`, and includes that changelog inside each archive.
+The [release workflow](.github/workflows/release.yml) publishes Windows, Linux,
+and macOS archives, generates release notes, and regenerates `CHANGELOG.md` from Git history.
+
+Release builds receive their version from CI; each archive includes a `VERSION`
+file. Source builds default to version `1.0.0`, so identify them by Git commit.
+There is no `--version` command. No version bump in the project file is needed.
 
 ## License
 
-SteamDepotFS is licensed under the Apache License, Version 2.0. See `LICENSE`
-and `NOTICE`.
-
-Binary distributions may include third-party NuGet packages under their own
-licenses, including SteamKit2 under LGPL-2.1-only. See
-`THIRD-PARTY-NOTICES.md`.
+[Apache-2.0](LICENSE); see [NOTICE](NOTICE). Dependencies retain their own licenses,
+including SteamKit2's LGPL-2.1-only; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

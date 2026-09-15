@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix username/password login by exchanging credentials for an in-memory Steam
+  client refresh token; retain token login and noninteractive Steam Guard codes.
+
 ## v0.2.0
 
 Changes since v0.1.1:
