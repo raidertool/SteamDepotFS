@@ -254,7 +254,7 @@ internal static class Program
           --password VALUE              Steam password. Env: STEAM_PASSWORD.
           --auth-code VALUE             Steam Guard email code. Env: STEAM_AUTH_CODE.
           --two-factor-code VALUE       Steam mobile auth code. Env: STEAM_TWO_FACTOR_CODE.
-          --access-token VALUE          Steam access token. Env: STEAM_ACCESS_TOKEN.
+          --access-token VALUE          Steam client refresh token; overrides password. Env: STEAM_ACCESS_TOKEN.
           --login-id ID                 Optional SteamKit login id. Env: STEAM_LOGIN_ID.
           --remember-password           Set SteamKit remember password flag.
           --timeout SECONDS             Overall command timeout. Default: 300.
@@ -895,11 +895,8 @@ internal sealed class SteamSession : IAsyncDisposable
         var loggedOn = new TaskCompletionSource<SteamUser.LoggedOnCallback>(TaskCreationOptions.RunContinuationsAsynchronously);
         var disconnected = new TaskCompletionSource<SteamClient.DisconnectedCallback>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        using var connectedSub = session._callbacks.Subscribe<SteamClient.ConnectedCallback>(callback =>
-        {
-            connected.TrySetResult(callback);
-            session.LogOn(credentials);
-        });
+        using var connectedSub = session._callbacks.Subscribe<SteamClient.ConnectedCallback>(
+            callback => connected.TrySetResult(callback));
 
         using var loggedOnSub = session._callbacks.Subscribe<SteamUser.LoggedOnCallback>(callback =>
         {
@@ -913,28 +910,35 @@ internal sealed class SteamSession : IAsyncDisposable
             }
         });
 
-        using var disconnectedSub = session._callbacks.Subscribe<SteamClient.DisconnectedCallback>(callback =>
-        {
-            disconnected.TrySetResult(callback);
-        });
+        using var disconnectedSub = session._callbacks.Subscribe<SteamClient.DisconnectedCallback>(
+            callback => disconnected.TrySetResult(callback));
 
-        client.Connect(null!);
-        var first = await Task.WhenAny(connected.Task, disconnected.Task).WaitAsync(cancellationToken);
-        if (first == disconnected.Task)
+        try
         {
-            throw new IOException("Steam disconnected before CM connection completed.");
+            client.Connect(null!);
+            var first = await Task.WhenAny(connected.Task, disconnected.Task).WaitAsync(cancellationToken);
+            if (first == disconnected.Task)
+            {
+                throw new IOException("Steam disconnected before CM connection completed.");
+            }
+
+            await connected.Task.WaitAsync(cancellationToken);
+            await session.LogOnAsync(credentials, cancellationToken);
+
+            var completed = await Task.WhenAny(loggedOn.Task, disconnected.Task).WaitAsync(cancellationToken);
+            if (completed == disconnected.Task)
+            {
+                throw new IOException("Steam disconnected before logon completed.");
+            }
+
+            await loggedOn.Task.WaitAsync(cancellationToken);
+            return session;
         }
-
-        await connected.Task.WaitAsync(cancellationToken);
-
-        var completed = await Task.WhenAny(loggedOn.Task, disconnected.Task).WaitAsync(cancellationToken);
-        if (completed == disconnected.Task)
+        catch
         {
-            throw new IOException("Steam disconnected before logon completed.");
+            await session.DisposeAsync();
+            throw;
         }
-
-        await loggedOn.Task.WaitAsync(cancellationToken);
-        return session;
     }
 
     public async Task<byte[]> GetDepotKeyAsync(uint appId, uint depotId, CancellationToken cancellationToken)
@@ -1035,7 +1039,7 @@ internal sealed class SteamSession : IAsyncDisposable
         _callbackLoopCts.Dispose();
     }
 
-    private void LogOn(SteamCredentials credentials)
+    private async Task LogOnAsync(SteamCredentials credentials, CancellationToken cancellationToken)
     {
         if (credentials.IsAnonymous)
         {
@@ -1043,16 +1047,13 @@ internal sealed class SteamSession : IAsyncDisposable
             return;
         }
 
-        _user.LogOn(new SteamUser.LogOnDetails
+        var details = await SteamLogin.CreateLogOnDetailsAsync(credentials, async (authDetails, ct) =>
         {
-            Username = credentials.Username,
-            Password = credentials.Password,
-            AccessToken = credentials.AccessToken,
-            AuthCode = credentials.AuthCode,
-            TwoFactorCode = credentials.TwoFactorCode,
-            LoginID = credentials.LoginId,
-            ShouldRememberPassword = credentials.RememberPassword
-        });
+            var authSession = await Client.Authentication.BeginAuthSessionViaCredentialsAsync(authDetails).WaitAsync(ct);
+            var result = await authSession.PollingWaitForResultAsync(ct).WaitAsync(ct);
+            return (result.AccountName, result.RefreshToken);
+        }, cancellationToken);
+        _user.LogOn(details);
     }
 
     private async Task RunCallbacksAsync()
