@@ -98,6 +98,15 @@ SteamDepotFs.exe mount `
   --mount-point X:
 ```
 
+For a bounded WinFsp I/O diagnostic, set `STEAM_DEPOTFS_TRACE_IO=1` before
+mounting. Standard error then records the first five reads and every 5,000th
+read with cumulative bytes, plus the first 50 write-intent opens and first
+100 denied-write operations with their depot paths if those callbacks run.
+Windows may reject a write before calling WinFsp, so absence of a write trace
+does not prove the caller never tried to write. Mount permissions and
+write-protection behavior stay unchanged. Keep this log private if depot path
+names are sensitive.
+
 Unmount on Linux:
 
 ```bash
