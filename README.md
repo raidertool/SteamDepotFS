@@ -133,6 +133,11 @@ Anonymous login is used unless credentials are provided. Credentials can be pass
 | `--login-id` | `STEAM_LOGIN_ID` |
 | `--remember-password` | `STEAM_REMEMBER_PASSWORD=1` |
 
+If the network blocks the CM WebSocket ports returned by Steam discovery, set
+`STEAM_CM_HOST` to a reachable `cmpN-region.steamserver.net` hostname. This
+connects to that CM over WebSocket on port 443. Without the override,
+SteamDepotFS uses normal SteamKit discovery.
+
 Private branches may also require:
 
 ```bash
