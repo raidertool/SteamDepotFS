@@ -123,12 +123,18 @@ internal static class WinFspMountSupport
         private readonly DepotReader _reader;
         private readonly ulong _createdAt;
         private readonly ulong _mountedAt;
+        private readonly bool _traceIo;
+        private long _readCalls;
+        private long _readBytes;
+        private int _writeIntentEvents;
+        private int _deniedWriteEvents;
 
         public WinFspDepotFileSystem(DepotReader reader)
         {
             _reader = reader;
             _createdAt = ToFileTime(reader.Manifest.CreationTime);
             _mountedAt = ToFileTime(DateTime.UtcNow);
+            _traceIo = Environment.GetEnvironmentVariable("STEAM_DEPOTFS_TRACE_IO") == "1";
         }
 
         public override int Init(object host)
@@ -217,6 +223,11 @@ internal static class WinFspMountSupport
 
             fileNode = node;
             fileInfo = FileInfoFor(node);
+            const uint writeAccess = 0x00000002 | 0x00000004 | 0x00000010 | 0x00000100 | 0x00010000;
+            if ((grantedAccess & writeAccess) != 0)
+            {
+                TraceWrite("open-write-intent", fileName);
+            }
             return STATUS_SUCCESS;
         }
 
@@ -262,6 +273,15 @@ internal static class WinFspMountSupport
             }
 
             bytesTransferred = (uint)read;
+            if (_traceIo)
+            {
+                var calls = Interlocked.Increment(ref _readCalls);
+                var bytes = Interlocked.Add(ref _readBytes, read);
+                if (calls <= 5 || calls % 5000 == 0)
+                {
+                    Console.Error.WriteLine($"WinFsp trace utc={DateTime.UtcNow:O} read calls={calls} bytes={bytes} path={file.FileName}");
+                }
+            }
             return STATUS_SUCCESS;
         }
 
@@ -372,6 +392,7 @@ internal static class WinFspMountSupport
             fileDesc = null!;
             fileInfo = default;
             normalizedName = fileName;
+            TraceWrite("create-denied", fileName);
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
 
@@ -388,6 +409,7 @@ internal static class WinFspMountSupport
         {
             bytesTransferred = 0;
             fileInfo = fileNode is WinFspNode node ? FileInfoFor(node) : default;
+            TraceWrite("write-denied", fileNode is WinFspNode writtenNode ? writtenNode.Path : "<unknown>");
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
 
@@ -400,6 +422,7 @@ internal static class WinFspMountSupport
             out FileInfo fileInfo)
         {
             fileInfo = fileNode is WinFspNode node ? FileInfoFor(node) : default;
+            TraceWrite("overwrite-denied", fileNode is WinFspNode overwrittenNode ? overwrittenNode.Path : "<unknown>");
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
 
@@ -414,6 +437,7 @@ internal static class WinFspMountSupport
             out FileInfo fileInfo)
         {
             fileInfo = fileNode is WinFspNode node ? FileInfoFor(node) : default;
+            TraceWrite("set-basic-info-denied", fileNode is WinFspNode changedNode ? changedNode.Path : "<unknown>");
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
 
@@ -425,11 +449,15 @@ internal static class WinFspMountSupport
             out FileInfo fileInfo)
         {
             fileInfo = fileNode is WinFspNode node ? FileInfoFor(node) : default;
+            TraceWrite("set-file-size-denied", fileNode is WinFspNode resizedNode ? resizedNode.Path : "<unknown>");
             return STATUS_MEDIA_WRITE_PROTECTED;
         }
 
         public override int CanDelete(object fileNode, object fileDesc, string fileName)
-            => STATUS_MEDIA_WRITE_PROTECTED;
+        {
+            TraceWrite("delete-denied", fileName);
+            return STATUS_MEDIA_WRITE_PROTECTED;
+        }
 
         public override int Rename(
             object fileNode,
@@ -437,14 +465,42 @@ internal static class WinFspMountSupport
             string fileName,
             string newFileName,
             bool replaceIfExists)
-            => STATUS_MEDIA_WRITE_PROTECTED;
+        {
+            TraceWrite("rename-denied", fileName);
+            return STATUS_MEDIA_WRITE_PROTECTED;
+        }
 
         public override int SetSecurity(
             object fileNode,
             object fileDesc,
             AccessControlSections sections,
             byte[] securityDescriptor)
-            => STATUS_MEDIA_WRITE_PROTECTED;
+        {
+            TraceWrite("set-security-denied", fileNode is WinFspNode node ? node.Path : "<unknown>");
+            return STATUS_MEDIA_WRITE_PROTECTED;
+        }
+
+        private void TraceWrite(string operation, string path)
+        {
+            if (!_traceIo)
+            {
+                return;
+            }
+
+            var intent = operation == "open-write-intent";
+            var events = intent
+                ? Interlocked.Increment(ref _writeIntentEvents)
+                : Interlocked.Increment(ref _deniedWriteEvents);
+            var limit = intent ? 50 : 100;
+            if (events <= limit)
+            {
+                Console.Error.WriteLine($"WinFsp trace utc={DateTime.UtcNow:O} {operation} path={path}");
+            }
+            else if (events == limit + 1)
+            {
+                Console.Error.WriteLine($"WinFsp trace {(intent ? "write-intent" : "denied-write")} events truncated after {limit}");
+            }
+        }
 
         private bool TryGetNode(string path, out WinFspNode node)
         {

@@ -98,6 +98,15 @@ SteamDepotFs.exe mount `
   --mount-point X:
 ```
 
+For a bounded WinFsp I/O diagnostic, set `STEAM_DEPOTFS_TRACE_IO=1` before
+mounting. Standard error then records the first five reads and every 5,000th
+read with cumulative bytes, plus the first 50 write-intent opens and first
+100 denied-write operations with their depot paths if those callbacks run.
+Windows may reject a write before calling WinFsp, so absence of a write trace
+does not prove the caller never tried to write. Mount permissions and
+write-protection behavior stay unchanged. Keep this log private if depot path
+names are sensitive.
+
 Unmount on Linux:
 
 ```bash
@@ -123,6 +132,11 @@ Anonymous login is used unless credentials are provided. Credentials can be pass
 | `--access-token` | `STEAM_ACCESS_TOKEN` |
 | `--login-id` | `STEAM_LOGIN_ID` |
 | `--remember-password` | `STEAM_REMEMBER_PASSWORD=1` |
+
+If the network blocks the CM WebSocket ports returned by Steam discovery, set
+`STEAM_CM_HOST` to a reachable `cmpN-region.steamserver.net` hostname. This
+connects to that CM over WebSocket on port 443. Without the override,
+SteamDepotFS uses normal SteamKit discovery.
 
 Private branches may also require:
 

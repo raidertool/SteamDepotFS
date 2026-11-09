@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using SteamKit2;
 using SteamKit2.CDN;
+using SteamKit2.Discovery;
 
 internal static class Program
 {
@@ -887,7 +889,19 @@ internal sealed class SteamSession : IAsyncDisposable
 
     public static async Task<SteamSession> ConnectAsync(SteamCredentials credentials, CancellationToken cancellationToken)
     {
-        var configuration = SteamConfiguration.Create(static builder => { });
+        var cmHost = Environment.GetEnvironmentVariable("STEAM_CM_HOST");
+        if (cmHost is not null &&
+            !Regex.IsMatch(cmHost, @"^cmp[0-9]+-[a-z0-9-]+\.steamserver\.net$", RegexOptions.CultureInvariant))
+        {
+            throw new ArgumentException("STEAM_CM_HOST must be a Steam CM hostname (cmpN-region.steamserver.net).");
+        }
+        var configuration = SteamConfiguration.Create(builder =>
+        {
+            if (cmHost is not null)
+            {
+                builder.WithProtocolTypes(ProtocolTypes.WebSocket);
+            }
+        });
         var client = new SteamClient(configuration);
         var session = new SteamSession(client);
 
@@ -918,7 +932,7 @@ internal sealed class SteamSession : IAsyncDisposable
             disconnected.TrySetResult(callback);
         });
 
-        client.Connect(null!);
+        client.Connect(cmHost is null ? null! : ServerRecord.CreateServer(cmHost, 443, ProtocolTypes.WebSocket));
         var first = await Task.WhenAny(connected.Task, disconnected.Task).WaitAsync(cancellationToken);
         if (first == disconnected.Task)
         {
